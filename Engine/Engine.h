@@ -1,9 +1,5 @@
 #pragma once
 
-/**
- * Muk Game Engine - Main public header
- */
-
 #include "Core/Core.h"
 #include "Core/Application.h"
 #include "Core/Log.h"
@@ -16,6 +12,7 @@
 #include "Renderer/Renderer.h"
 #include "Renderer/Mesh.h"
 #include "Renderer/Material.h"
+#include "Renderer/Texture.h"
 #include "Input/Input.h"
 #include "Physics/PhysicsWorld.h"
 #include "Asset/AssetManager.h"
