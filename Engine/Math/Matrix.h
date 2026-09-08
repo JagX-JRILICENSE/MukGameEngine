@@ -33,16 +33,29 @@ struct Mat4 {
         return result;
     }
 
-    // Perspective projection (simple)
-    static Mat4 Perspective(f32 fovY, f32 aspect, f32 nearZ, f32 farZ) {
+    static Mat4 Perspective(f32 fovYRadians, f32 aspect, f32 nearZ, f32 farZ) {
         Mat4 result{};
-        f32 tanHalfFovy = std::tan(fovY * 0.5f);
+        f32 tanHalfFovy = std::tan(fovYRadians * 0.5f);
         result.m[0] = 1.0f / (aspect * tanHalfFovy);
         result.m[5] = 1.0f / tanHalfFovy;
-        result.m[10] = -(farZ + nearZ) / (farZ - nearZ);
+        result.m[10] = farZ / (nearZ - farZ);
         result.m[11] = -1.0f;
-        result.m[14] = -(2.0f * farZ * nearZ) / (farZ - nearZ);
+        result.m[14] = (nearZ * farZ) / (nearZ - farZ);
         result.m[15] = 0.0f;
+        return result;
+    }
+
+    // Right-handed LookAt (camera at eye looking at target)
+    static Mat4 LookAt(const Vec3& eye, const Vec3& target, const Vec3& up) {
+        Vec3 z = (eye - target).Normalized(); // forward (into scene is -Z in RH)
+        Vec3 x = Vec3::Cross(up, z).Normalized();
+        Vec3 y = Vec3::Cross(z, x);
+
+        Mat4 result;
+        result.m[0] = x.x;  result.m[4] = x.y;  result.m[8]  = x.z;  result.m[12] = -Vec3::Dot(x, eye);
+        result.m[1] = y.x;  result.m[5] = y.y;  result.m[9]  = y.z;  result.m[13] = -Vec3::Dot(y, eye);
+        result.m[2] = z.x;  result.m[6] = z.y;  result.m[10] = z.z;  result.m[14] = -Vec3::Dot(z, eye);
+        result.m[3] = 0;    result.m[7] = 0;    result.m[11] = 0;    result.m[15] = 1;
         return result;
     }
 
