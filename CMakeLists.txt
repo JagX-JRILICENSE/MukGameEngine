@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(MukGameEngine VERSION 0.2.0 LANGUAGES CXX)
+project(MukGameEngine VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,8 +33,15 @@ if(MUK_USE_IMGUI)
         GIT_TAG docking
     )
     FetchContent_MakeAvailable(imgui)
+
+    FetchContent_Declare(imguizmo
+        GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo.git
+        GIT_TAG master
+    )
+    FetchContent_MakeAvailable(imguizmo)
+
     add_compile_definitions(MUK_USE_IMGUI)
-    message(STATUS "ImGui (docking): enabled")
+    message(STATUS "ImGui (docking) + ImGuizmo: enabled")
 endif()
 
 # ---- Jolt Physics ----
