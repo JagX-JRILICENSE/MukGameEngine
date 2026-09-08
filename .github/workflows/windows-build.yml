@@ -1,0 +1,96 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Muk (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure CMake (full features)
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+            -DMUK_USE_IMGUI=ON `
+            -DMUK_USE_TINYGLTF=ON `
+            -DMUK_USE_JOLT=OFF `
+            -DMUK_BUILD_SAMPLES=OFF
+
+      - name: Build Release
+        run: cmake --build build --config Release --parallel
+
+      - name: Stage install package
+        shell: pwsh
+        run: |
+          $out = "MukGameEngine-Windows-x64"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          New-Item -ItemType Directory -Force -Path "$out/bin" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$out/config" | Out-Null
+
+          $bin = "build/bin/Release"
+          if (-not (Test-Path $bin)) { $bin = "build/bin" }
+
+          Copy-Item "$bin/MukRuntime.exe" "$out/bin/" -ErrorAction SilentlyContinue
+          Copy-Item "$bin/MukEditor.exe" "$out/bin/" -ErrorAction SilentlyContinue
+          Get-ChildItem $bin -Filter "*.dll" -ErrorAction SilentlyContinue | Copy-Item -Destination "$out/bin/"
+
+          Copy-Item README.md "$out/" -ErrorAction SilentlyContinue
+          Copy-Item LICENSE "$out/" -ErrorAction SilentlyContinue
+
+          @"
+          # Muk user settings (DO NOT commit real keys)
+          # Copy to %APPDATA%\\MukGameEngine\\settings.json or next to the exe
+
+          provider=openrouter
+          openrouter_api_key=
+          openrouter_model=openai/gpt-4o-mini
+          nvidia_api_key=
+          nvidia_base_url=https://integrate.api.nvidia.com/v1
+          openai_api_key=
+          openai_base_url=https://api.openai.com/v1
+          custom_api_key=
+          custom_base_url=
+          custom_model=
+          "@ | Set-Content -Encoding utf8 "$out/config/settings.example.ini"
+
+          @"
+          Muk Game Engine — Windows package
+          ==================================
+
+          1. Run bin\\MukEditor.exe  (editor + viewport + AI panel)
+             or bin\\MukRuntime.exe (sandbox game loop)
+
+          2. API keys (Bring Your Own Key):
+             - Copy config\\settings.example.ini to:
+                 %APPDATA%\\MukGameEngine\\settings.ini
+             - Fill in openrouter_api_key / nvidia_api_key / openai_api_key
+             - Restart the editor; use the AI Control panel
+
+          3. Keys never leave your machine except to the provider you chose.
+
+          Status: early foundation (not full Unreal parity yet).
+          Roadmap targets Unreal-class rendering, tools, and AI-assisted workflows.
+          "@ | Set-Content -Encoding utf8 "$out/INSTALL.txt"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MukGameEngine-Windows-x64
+          path: MukGameEngine-Windows-x64
+          if-no-files-found: warn
+
+      - name: List binaries
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse build/bin -ErrorAction SilentlyContinue | Select-Object FullName
