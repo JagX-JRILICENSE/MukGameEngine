@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Vector.h"
+#include <cmath>
 
 namespace Muk {
 
@@ -42,6 +43,20 @@ struct Mat4 {
         result.m[11] = -1.0f;
         result.m[14] = -(2.0f * farZ * nearZ) / (farZ - nearZ);
         result.m[15] = 0.0f;
+        return result;
+    }
+
+    Mat4 operator*(const Mat4& other) const {
+        Mat4 result{};
+        for (int col = 0; col < 4; ++col) {
+            for (int row = 0; row < 4; ++row) {
+                result.m[col * 4 + row] =
+                    m[0 * 4 + row] * other.m[col * 4 + 0] +
+                    m[1 * 4 + row] * other.m[col * 4 + 1] +
+                    m[2 * 4 + row] * other.m[col * 4 + 2] +
+                    m[3 * 4 + row] * other.m[col * 4 + 3];
+            }
+        }
         return result;
     }
 };
