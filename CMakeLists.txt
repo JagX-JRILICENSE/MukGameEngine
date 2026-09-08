@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.25)
-project(MukGameEngine VERSION 0.6.1 LANGUAGES CXX)
+project(MukGameEngine VERSION 0.9.0 LANGUAGES CXX)
+
+# CMake 3.30+ errors on FetchContent_Populate unless policy set
+if(POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)
+endif()
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,7 +21,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 option(MUK_BUILD_EDITOR "Build the Muk Editor" ON)
-option(MUK_BUILD_SAMPLES "Build sample projects" ON)
+option(MUK_BUILD_SAMPLES "Build sample projects" OFF)
 option(MUK_USE_DX12 "Enable DirectX 12 backend (Windows)" ON)
 option(MUK_USE_VULKAN "Enable Vulkan backend" OFF)
 option(MUK_USE_IMGUI "Fetch and enable Dear ImGui docking" OFF)
@@ -21,6 +29,7 @@ option(MUK_USE_JOLT "Fetch and enable Jolt Physics" OFF)
 option(MUK_USE_TINYGLTF "Fetch and enable tinygltf for glTF loading" OFF)
 
 include(FetchContent)
+set(FETCHCONTENT_QUIET OFF)
 
 if(WIN32)
     add_compile_definitions(MUK_PLATFORM_WINDOWS)
@@ -33,12 +42,17 @@ if(MUK_USE_IMGUI)
     FetchContent_Declare(imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
         GIT_TAG docking
+        GIT_SHALLOW TRUE
     )
-    FetchContent_MakeAvailable(imgui)
+    FetchContent_GetProperties(imgui)
+    if(NOT imgui_POPULATED)
+        FetchContent_Populate(imgui)
+    endif()
 
     FetchContent_Declare(imguizmo
         GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo.git
         GIT_TAG master
+        GIT_SHALLOW TRUE
     )
     FetchContent_GetProperties(imguizmo)
     if(NOT imguizmo_POPULATED)
@@ -47,6 +61,8 @@ if(MUK_USE_IMGUI)
 
     add_compile_definitions(MUK_USE_IMGUI)
     message(STATUS "ImGui (docking) + ImGuizmo: enabled")
+    message(STATUS "  imgui: ${imgui_SOURCE_DIR}")
+    message(STATUS "  imguizmo: ${imguizmo_SOURCE_DIR}")
 endif()
 
 if(MUK_USE_JOLT)
@@ -54,6 +70,7 @@ if(MUK_USE_JOLT)
         GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
         GIT_TAG v5.2.0
         SOURCE_SUBDIR Build
+        GIT_SHALLOW TRUE
     )
     set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
     set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
@@ -69,13 +86,14 @@ if(MUK_USE_TINYGLTF)
     FetchContent_Declare(tinygltf
         GIT_REPOSITORY https://github.com/syoyo/tinygltf.git
         GIT_TAG v2.9.3
+        GIT_SHALLOW TRUE
     )
     FetchContent_GetProperties(tinygltf)
     if(NOT tinygltf_POPULATED)
         FetchContent_Populate(tinygltf)
     endif()
     add_compile_definitions(MUK_USE_TINYGLTF)
-    message(STATUS "tinygltf: enabled")
+    message(STATUS "tinygltf: enabled (${tinygltf_SOURCE_DIR})")
 endif()
 
 include_directories(${CMAKE_SOURCE_DIR}/Engine)
@@ -87,7 +105,7 @@ if(MUK_BUILD_EDITOR)
     add_subdirectory(Editor)
 endif()
 
-if(MUK_BUILD_SAMPLES)
+if(MUK_BUILD_SAMPLES AND EXISTS "${CMAKE_SOURCE_DIR}/Samples/CMakeLists.txt")
     add_subdirectory(Samples)
 endif()
 
