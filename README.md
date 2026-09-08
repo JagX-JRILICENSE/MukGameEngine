@@ -1,62 +1,48 @@
-# Muk Game Engine v0.8
+# Muk Game Engine v0.9
 
-C++20 / DirectX 12 Windows engine with **multi-agent AI game production**.
-
+**Product name:** Muk Game Engine  
 **Repo:** https://github.com/JagX-JRILICENSE/MukGameEngine
 
 ---
 
-## Multi-agent AI (OpenRouter + NVIDIA)
+## Download Windows app
 
-Set **both** keys in **AI Control** (free models supported) so agents can specialize:
+**Actions → Windows Build → artifact `MukGameEngine-Windows-x64`**
 
-| Role | Typical provider | Job |
-|------|------------------|-----|
-| **Architect** | OpenRouter | Design doc, levels, win conditions |
-| **Builder** | NVIDIA | Scene ACTION placement |
-| **Scripter** | OpenRouter | **Muk Script** gameplay |
-| **Critic** | NVIDIA | Verify + demand fixes |
-
-Pipeline: **Architect → Builder → Scripter → UI → Preview → Critic → Fix → Playtest**
-
-### Muk Script (AI-written gameplay)
-
-```text
-BEGIN_SCRIPT
-set score 0
-on_start
-  show_ui hud Score:0
-on_update dt
-  if key W then move Player 0 0 5*dt
-  if key A then move Player -5*dt 0 0
-  if key D then move Player 5*dt 0 0
-  if key S then move Player 0 0 -5*dt
-  if score >= 3 then win You win
-END_SCRIPT
-```
-
-Supports: variables, `if/then`, movement, spawn/destroy, **load_level**, UI, sounds, win/lose.
-
-### How to run
-
-1. Paste OpenRouter **and/or** NVIDIA keys → Save  
-2. **AI Game Builder** → describe a full mini-game → **Build complete game with AI**  
-3. Watch team log; **Run script now** for longer WASD play  
+Run `bin\Muk Game Engine.exe` or `MukEditor.exe`.
 
 ---
 
-## Engine features (v0.8)
+## v0.9 upgrades
 
-Per-pixel cascades, animation system, spatial audio, content browser, scene JSON, reflection UI, IBL/tonemap, PIE, undo, character, **gameplay VM**, **multi-level runtime**, **dual-provider agents**.
+### Pipeline / AI
+- **Distance triggers** — `proximity Player Orb1 1.5` + `on_trigger` for orb pickup
+- **Async AI** — background thread job queue (non-blocking editor)
+- **Autosave scripts** → `Assets/Scripts/last_generated.muk`
+- Multi-agent OpenRouter + NVIDIA team still first-class
+
+### Five new systems
+1. **Input action map** — named binds (MoveForward, Screenshot, …)
+2. **Prefabs** — Cube / Pillar / Orb / FloorTile / PlayerCapsule
+3. **Screenshots** — F12 → `Assets/Screenshots/*.tga`
+4. **Script hot-reload** — F9 reloads last generated Muk Script
+5. **App branding** — window title **Muk Game Engine**, VERSIONINFO resource
+
+### Controls
+| Key | Action |
+|-----|--------|
+| F5 | Play-In-Editor |
+| F9 | Reload gameplay script |
+| F12 | Screenshot |
+| WASD | Move / script move |
+| Ctrl+Z/Y | Undo/Redo |
 
 ---
 
-## Build / download
-
-Actions → **Windows Build** → `MukGameEngine-Windows-x64`
+## Local build
 
 ```powershell
-cmake -B build -G "Visual Studio 17 2022" -A x64 -DMUK_USE_IMGUI=ON -DMUK_USE_TINYGLTF=ON
+cmake -B build -A x64 -DMUK_USE_IMGUI=ON -DMUK_USE_TINYGLTF=ON -DMUK_USE_JOLT=OFF -DMUK_BUILD_SAMPLES=OFF
 cmake --build build --config Release
 ```
 
