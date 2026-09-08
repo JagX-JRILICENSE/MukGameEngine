@@ -1,6 +1,8 @@
 #include "PhysicsWorld.h"
 #include "Core/Log.h"
 
+#include <thread>
+
 #ifdef MUK_USE_JOLT
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
@@ -14,6 +16,59 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyActivationListener.h>
+
+// Minimal layer interfaces (see Jolt HelloWorld for production setup)
+namespace {
+    constexpr JPH::ObjectLayer LAYER_NON_MOVING = 0;
+    constexpr JPH::ObjectLayer LAYER_MOVING = 1;
+    constexpr JPH::BroadPhaseLayer BP_NON_MOVING(0);
+    constexpr JPH::BroadPhaseLayer BP_MOVING(1);
+
+    class BPLayerInterfaceImpl final : public JPH::BroadPhaseLayerInterface {
+    public:
+        BPLayerInterfaceImpl() {
+            mObjectToBroadPhase[LAYER_NON_MOVING] = BP_NON_MOVING;
+            mObjectToBroadPhase[LAYER_MOVING] = BP_MOVING;
+        }
+        virtual unsigned GetNumBroadPhaseLayers() const override { return 2; }
+        virtual JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer inLayer) const override {
+            return mObjectToBroadPhase[inLayer];
+        }
+#if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
+        virtual const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer inLayer) const override {
+            return (unsigned)inLayer == 0 ? "NON_MOVING" : "MOVING";
+        }
+#endif
+    private:
+        JPH::BroadPhaseLayer mObjectToBroadPhase[2];
+    };
+
+    class ObjectVsBroadPhaseLayerFilterImpl : public JPH::ObjectVsBroadPhaseLayerFilter {
+    public:
+        virtual bool ShouldCollide(JPH::ObjectLayer inLayer1, JPH::BroadPhaseLayer inLayer2) const override {
+            switch (inLayer1) {
+                case LAYER_NON_MOVING: return inLayer2 == BP_MOVING;
+                case LAYER_MOVING: return true;
+                default: return false;
+            }
+        }
+    };
+
+    class ObjectLayerPairFilterImpl : public JPH::ObjectLayerPairFilter {
+    public:
+        virtual bool ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const override {
+            switch (inObject1) {
+                case LAYER_NON_MOVING: return inObject2 == LAYER_MOVING;
+                case LAYER_MOVING: return true;
+                default: return false;
+            }
+        }
+    };
+
+    static BPLayerInterfaceImpl s_BPLayers;
+    static ObjectVsBroadPhaseLayerFilterImpl s_ObjectVsBroadPhase;
+    static ObjectLayerPairFilterImpl s_ObjectVsObject;
+}
 #endif
 
 namespace Muk {
@@ -37,12 +92,13 @@ PhysicsWorld::~PhysicsWorld() {
 void PhysicsWorld::Initialize() {
 #ifdef MUK_USE_JOLT
     InitJolt();
-    if (m_Jolt) {
+    if (m_Jolt && m_Jolt->System) {
         MUK_CORE_INFO("PhysicsWorld: using Jolt Physics");
         m_Initialized = true;
         return;
     }
     MUK_CORE_WARN("PhysicsWorld: Jolt init failed, falling back to simple solver");
+    m_Jolt.reset();
 #endif
     InitSimple();
     m_Initialized = true;
@@ -66,25 +122,15 @@ void PhysicsWorld::InitJolt() {
     }
 
     m_Jolt->TempAllocator = new JPH::TempAllocatorImpl(10 * 1024 * 1024);
+    int threads = static_cast<int>(std::thread::hardware_concurrency()) - 1;
+    if (threads < 1) threads = 1;
     m_Jolt->JobSystem = new JPH::JobSystemThreadPool(
-        JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers,
-        static_cast<int>(std::thread::hardware_concurrency()) - 1);
-
-    const unsigned maxBodies = 1024;
-    const unsigned numBodyMutexes = 0;
-    const unsigned maxBodyPairs = 1024;
-    const unsigned maxContactConstraints = 1024;
+        JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers, threads);
 
     m_Jolt->System = new JPH::PhysicsSystem();
-    m_Jolt->System->Init(maxBodies, numBodyMutexes, maxBodyPairs, maxContactConstraints,
-                         JPH::BroadPhaseLayerInterfaceTable(2, 2),
-                         JPH::ObjectVsBroadPhaseLayerFilterTable(2, 2),
-                         JPH::ObjectLayerPairFilterTable(2));
-
-    // Simplified layer setup - production code would define proper layers
+    m_Jolt->System->Init(1024, 0, 1024, 1024,
+                         s_BPLayers, s_ObjectVsBroadPhase, s_ObjectVsObject);
     m_Jolt->System->SetGravity(JPH::Vec3(m_Gravity.x, m_Gravity.y, m_Gravity.z));
-#else
-    // no-op
 #endif
 }
 
@@ -99,6 +145,13 @@ void PhysicsWorld::Shutdown() {
 void PhysicsWorld::ShutdownJolt() {
 #ifdef MUK_USE_JOLT
     if (!m_Jolt) return;
+    if (m_Jolt->System) {
+        for (auto& [id, bodyId] : m_Jolt->BodyMap) {
+            m_Jolt->System->GetBodyInterface().RemoveBody(bodyId);
+            m_Jolt->System->GetBodyInterface().DestroyBody(bodyId);
+        }
+        m_Jolt->BodyMap.clear();
+    }
     delete m_Jolt->System;
     delete m_Jolt->JobSystem;
     delete m_Jolt->TempAllocator;
@@ -140,26 +193,24 @@ EntityID PhysicsWorld::CreateBody(const RigidBodyDesc& desc) {
             desc.Type == BodyType::Kinematic ? JPH::EMotionType::Kinematic :
             JPH::EMotionType::Dynamic;
 
+        JPH::ObjectLayer layer = (desc.Type == BodyType::Static) ? LAYER_NON_MOVING : LAYER_MOVING;
+
         JPH::BodyCreationSettings settings(
             shape,
             JPH::RVec3(desc.Position.x, desc.Position.y, desc.Position.z),
             JPH::Quat::sIdentity(),
             motion,
-            0 // object layer
+            layer
         );
         settings.mFriction = desc.Friction;
         settings.mRestitution = desc.Restitution;
-        if (desc.Type == BodyType::Dynamic)
-            settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
 
         JPH::BodyID joltId = bi.CreateAndAddBody(settings, JPH::EActivation::Activate);
         EntityID id = m_NextBodyId++;
         m_Jolt->BodyMap[id] = joltId;
-        MUK_CORE_TRACE("Jolt body created {0}", id);
         return id;
     }
 #endif
-    // Simple backend
     SimpleBody body;
     body.Id = m_NextBodyId++;
     body.Desc = desc;
@@ -235,8 +286,7 @@ void PhysicsWorld::UpdateSimple(f32 deltaTime) {
 
 void PhysicsWorld::UpdateJolt(f32 deltaTime) {
 #ifdef MUK_USE_JOLT
-    const int collisionSteps = 1;
-    m_Jolt->System->Update(deltaTime, collisionSteps, m_Jolt->TempAllocator, m_Jolt->JobSystem);
+    m_Jolt->System->Update(deltaTime, 1, m_Jolt->TempAllocator, m_Jolt->JobSystem);
 #else
     (void)deltaTime;
 #endif
