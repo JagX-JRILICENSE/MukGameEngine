@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <cctype>
 
 #ifdef MUK_PLATFORM_WINDOWS
 #include <Windows.h>
@@ -19,9 +20,14 @@
 
 namespace Muk {
 
-void AIGameAgent::SetClient(AIClient*) {
-    // Team owns clients per role; kept for API compat
+static std::string TrimCopy(const std::string& s) {
+    size_t i = s.find_first_not_of(" \t\r\n");
+    if (i == std::string::npos) return {};
+    size_t j = s.find_last_not_of(" \t\r\n");
+    return s.substr(i, j - i + 1);
 }
+
+void AIGameAgent::SetClient(AIClient*) {}
 
 void AIGameAgent::SetSettings(const UserSettings& settings) {
     m_Team.SetSettings(settings);
@@ -76,18 +82,9 @@ std::string AIGameAgent::ExtractBlock(const std::string& text, const std::string
     return text.substr(a, b - a);
 }
 
-// local helper
-static std::string TrimCopy(const std::string& s) {
-    size_t i = s.find_first_not_of(" \t\r\n");
-    if (i == std::string::npos) return {};
-    size_t j = s.find_last_not_of(" \t\r\n");
-    return s.substr(i, j - i + 1);
-}
-
 std::string AIGameAgent::ExtractScript(const std::string& text) const {
     auto block = ExtractBlock(text, "BEGIN_SCRIPT", "END_SCRIPT");
     if (!block.empty()) return TrimCopy(block);
-    // fallback: lines that look like script
     std::istringstream iss(text);
     std::string line, out;
     bool any = false;
@@ -111,12 +108,19 @@ void AIGameAgent::ApplyActions(World& world, Renderer& renderer, AudioSystem* au
     std::istringstream iss(text);
     std::string line;
     while (std::getline(iss, line)) {
-        if (line.find("ACTION:") == std::string::npos &&
-            line.find("LEVEL:") == std::string::npos) continue;
+        if (line.find("ACTION:") == std::string::npos && line.find("LEVEL:") == std::string::npos)
+            continue;
 
         if (line.find("define_level") != std::string::npos) {
             char id[64] = {}, name[128] = {};
-            sscanf(line.c_str(), "%*s define_level id=%63s name=%127s", id, name);
+            if (sscanf(line.c_str(), "%*[^d]define_level id=%63s name=%127s", id, name) >= 1 ||
+                sscanf(line.c_str(), "%*s define_level id=%63s name=%127s", id, name) >= 1) {
+                /* try simpler */
+            }
+            auto idPos = line.find("id=");
+            auto namePos = line.find("name=");
+            if (idPos != std::string::npos) sscanf(line.c_str() + idPos, "id=%63s", id);
+            if (namePos != std::string::npos) sscanf(line.c_str() + namePos, "name=%127s", name);
             if (id[0]) {
                 GameRuntime::Level L;
                 L.Id = id;
@@ -228,10 +232,8 @@ void AIGameAgent::ApplyActions(World& world, Renderer& renderer, AudioSystem* au
             continue;
         }
 
-        if (line.find("show_ui") != std::string::npos) {
-            // handled when script/UI phase applies via runtime; also stash
+        if (line.find("show_ui") != std::string::npos)
             m_UIActions += line + "\n";
-        }
     }
 }
 
@@ -275,8 +277,6 @@ ScriptHostCallbacks AIGameAgent::MakeHost(World& world, Renderer& renderer, Audi
                 m_Runtime.SetActiveScript(L->ScriptSource);
         }
     };
-    host.ShowUI = nullptr;
-    host.HideUI = nullptr;
     host.PlaySound = [audio](const std::string& clip) {
         if (!audio) return;
         AudioSourceDesc d; d.ClipName = clip; d.Spatial = false; audio->Play(d);
@@ -316,12 +316,11 @@ void AIGameAgent::RunLocalVerify(World& world) {
     });
     std::ostringstream issues;
     if (meshes < 2) issues << "ISSUE: too few mesh entities (" << meshes << ")\n";
-    if (m_Brief.find("player") != std::string::npos && !hasPlayer)
-        issues << "ISSUE: missing Player entity\n";
+    if (m_Brief.find("player") != std::string::npos || m_Brief.find("Player") != std::string::npos) {
+        if (!hasPlayer) issues << "ISSUE: missing Player entity\n";
+    }
     if (m_ScriptSource.empty())
         issues << "ISSUE: missing gameplay script\n";
-    if (m_Runtime.Levels().empty() && m_Brief.find("level") != std::string::npos)
-        issues << "ISSUE: no levels registered\n";
     m_LastIssues = issues.str();
 }
 
@@ -348,13 +347,7 @@ void AIGameAgent::Tick(World& world, Renderer& renderer, AudioSystem* audio,
         m_Status = "Architect designing levels & win conditions…";
         std::string sys =
             "You are the Architect for Muk Engine. Design a COMPLETE playable game.\n"
-            "Output sections:\n"
-            "DESIGN: (paragraph)\n"
-            "LEVELS: list id and name\n"
-            "WIN: condition\n"
-            "CONTROLS: WASD etc\n"
-            "Then ACTION lines for level metadata:\n"
-            "ACTION: define_level id=level1 name=Arena\n";
+            "Output DESIGN, LEVELS, WIN, CONTROLS, then ACTION: define_level id= name= lines.";
         auto resp = m_Team.AskRole(AgentRole::Architect, sys, m_Brief, 0.4f);
         if (!resp.Success) {
             m_Phase = AgentPhase::Failed; m_Status = resp.Error; Log(resp.Error, true); return;
@@ -369,28 +362,23 @@ void AIGameAgent::Tick(World& world, Renderer& renderer, AudioSystem* audio,
     if (m_Phase == AgentPhase::BuildingScene) {
         m_Status = "Builder placing scene…";
         std::string sys =
-            "You are the Builder for Muk Engine. Emit ONLY ACTION lines to place the world.\n"
-            "Allowed:\n"
+            "You are the Builder. Emit ONLY ACTION lines.\n"
             "ACTION: spawn_cube name=X x= y= z= sx= sy= sz= mesh=Cube material=Default\n"
             "ACTION: set_camera eye=x,y,z target=x,y,z\n"
             "ACTION: set_light dir=x,y,z intensity=1.2\n"
-            "ACTION: select name=X\n"
-            "ACTION: focus_camera\n"
-            "Create Floor, pillars/props, Player, collectible Orbs if needed. Bounds -10..10.\n";
-        std::string user = "Brief:\n" + m_Brief + "\n\nDesign doc:\n" + m_DesignDoc;
+            "Include Floor, Player, props/orbs as needed. Coords -10..10.";
+        std::string user = "Brief:\n" + m_Brief + "\n\nDesign:\n" + m_DesignDoc;
         auto resp = m_Team.AskRole(AgentRole::Builder, sys, user, 0.3f);
         if (!resp.Success) {
             m_Phase = AgentPhase::Failed; m_Status = resp.Error; Log(resp.Error, true); return;
         }
         m_SceneActions = resp.Content;
         ApplyActions(world, renderer, audio, entities, selected, resp.Content);
-        // stash into first level
-        if (!m_Runtime.Levels().empty()) {
-            auto& L = const_cast<GameRuntime::Level&>(m_Runtime.Levels()[0]);
-            L.SceneActions = m_SceneActions;
-        } else {
+        if (m_Runtime.Levels().empty()) {
             GameRuntime::Level L; L.Id = "level1"; L.Name = "Main"; L.SceneActions = m_SceneActions;
             m_Runtime.AddOrReplaceLevel(L);
+        } else if (auto* L = m_Runtime.GetLevel(m_Runtime.Levels()[0].Id)) {
+            L->SceneActions = m_SceneActions;
         }
         Log("Builder done");
         m_Phase = AgentPhase::WritingScript;
@@ -400,23 +388,11 @@ void AIGameAgent::Tick(World& world, Renderer& renderer, AudioSystem* audio,
     if (m_Phase == AgentPhase::WritingScript) {
         m_Status = "Scripter writing gameplay…";
         std::string sys =
-            "You are the Scripter for Muk Engine. Write Muk Script gameplay.\n"
-            "Wrap code between BEGIN_SCRIPT and END_SCRIPT.\n"
-            "Language:\n"
-            "  set score 0\n"
-            "  on_start\n"
-            "    show_ui hud Score:0\n"
-            "    show_ui title Collect orbs\n"
-            "  on_update dt\n"
-            "    if key W then move Player 0 0 5*dt\n"
-            "    if key S then move Player 0 0 -5*dt\n"
-            "    if key A then move Player -5*dt 0 0\n"
-            "    if key D then move Player 5*dt 0 0\n"
-            "    if score >= 3 then win You win\n"
-            "Commands: set/add, spawn_at, destroy, move, load_level, show_ui, hide_ui, play_sound, win, lose, if..then\n"
-            "Entity names must match Builder (Player, Orb1...).\n";
+            "You are the Scripter. Write Muk Script between BEGIN_SCRIPT and END_SCRIPT.\n"
+            "on_start / on_update dt / if key W then move Player 0 0 5*dt\n"
+            "set/add score, show_ui, win, load_level, play_sound supported.";
         std::string user = "Brief:\n" + m_Brief + "\nDesign:\n" + m_DesignDoc +
-                           "\nScene actions:\n" + m_SceneActions;
+                           "\nScene:\n" + m_SceneActions;
         auto resp = m_Team.AskRole(AgentRole::Scripter, sys, user, 0.25f);
         if (!resp.Success) {
             m_Phase = AgentPhase::Failed; m_Status = resp.Error; Log(resp.Error, true); return;
@@ -424,31 +400,25 @@ void AIGameAgent::Tick(World& world, Renderer& renderer, AudioSystem* audio,
         m_ScriptSource = ExtractScript(resp.Content);
         if (m_ScriptSource.empty()) m_ScriptSource = resp.Content;
         m_Runtime.SetActiveScript(m_ScriptSource);
-        if (!m_Runtime.Levels().empty()) {
-            // can't mutate const from Levels() - use GetLevel
+        if (!m_Runtime.Levels().empty())
             if (auto* L = m_Runtime.GetLevel(m_Runtime.Levels()[0].Id))
                 L->ScriptSource = m_ScriptSource;
-        }
-        Log("Scripter done (" + std::to_string(m_ScriptSource.size()) + " chars)");
+        Log("Scripter done");
         m_Phase = AgentPhase::BuildingUI;
         return;
     }
 
     if (m_Phase == AgentPhase::BuildingUI) {
         m_Status = "UI flow…";
-        // Ensure title/hud via script on_start; optional extra ACTIONs
-        if (m_UIActions.empty())
-            m_UIActions = "ACTION: show_ui id=title text=Muk Game\n";
-        Log("UI phase complete");
+        if (m_UIActions.empty()) m_UIActions = "ACTION: show_ui id=title text=Muk Game\n";
         m_Phase = AgentPhase::Previewing;
         return;
     }
 
     if (m_Phase == AgentPhase::Previewing) {
-        m_Status = "Preview framing…";
+        m_Status = "Preview…";
         CameraView cam = renderer.GetCamera();
-        cam.Eye = { 8, 6, -12 };
-        cam.Target = { 0, 0.5f, 0 };
+        cam.Eye = { 8, 6, -12 }; cam.Target = { 0, 0.5f, 0 };
         renderer.SetCamera(cam);
         if (audio) { AudioSourceDesc d; d.ClipName = "beep"; d.Spatial = false; audio->Play(d); }
         m_Phase = AgentPhase::Verifying;
@@ -458,14 +428,12 @@ void AIGameAgent::Tick(World& world, Renderer& renderer, AudioSystem* audio,
     if (m_Phase == AgentPhase::Verifying) {
         m_Status = "Critic verifying…";
         RunLocalVerify(world);
-        std::string sys =
-            "You are the Critic. Check the game is complete. Reply OK or ISSUE: lines.\n"
-            "Require: scene entities, Player, gameplay script with on_update movement, win condition.\n";
+        std::string sys = "Critic: reply OK or ISSUE: lines. Need Player, script with movement, win condition.";
         std::ostringstream user;
-        user << "Brief: " << m_Brief << "\nDesign: " << m_DesignDoc.substr(0, 1500)
-             << "\nScript:\n" << m_ScriptSource.substr(0, 2000) << "\nEntities:\n";
+        user << "Brief: " << m_Brief << "\nScript:\n" << m_ScriptSource.substr(0, 2000) << "\nEntities:\n";
         world.ForEach<NameComponent, Transform>([&](Entity, NameComponent& n, Transform& t) {
-            user << "- " << n.Name << " @ " << t.Position.x << "," << t.Position.y << "," << t.Position.z << "\n";
+            user << "- " << n.Name << "\n";
+            (void)t;
         });
         auto resp = m_Team.AskRole(AgentRole::Critic, sys, user.str(), 0.15f);
         if (resp.Success) {
@@ -473,18 +441,10 @@ void AIGameAgent::Tick(World& world, Renderer& renderer, AudioSystem* audio,
             if (resp.Content.find("ISSUE:") != std::string::npos)
                 m_LastIssues += resp.Content + "\n";
         }
-        if (m_LastIssues.empty() && (resp.Success && resp.Content.find("OK") != std::string::npos)) {
+        if (m_LastIssues.empty()) {
             m_Phase = AgentPhase::Playtesting;
             m_PlayTestTimer = 2.5f;
-            m_Status = "Playtesting scripts…";
-            m_Runtime.StartPlay(MakeHost(world, renderer, audio, entities, selected));
-            Log("Playtest started");
-            return;
-        }
-        if (m_LastIssues.empty()) {
-            // soft pass
-            m_Phase = AgentPhase::Playtesting;
-            m_PlayTestTimer = 2.0f;
+            m_Status = "Playtesting…";
             m_Runtime.StartPlay(MakeHost(world, renderer, audio, entities, selected));
             return;
         }
@@ -495,27 +455,18 @@ void AIGameAgent::Tick(World& world, Renderer& renderer, AudioSystem* audio,
     if (m_Phase == AgentPhase::Fixing) {
         if (m_FixAttempts >= kMaxFixAttempts) {
             m_Phase = AgentPhase::Failed;
-            m_Status = "Failed after fix attempts — see log";
+            m_Status = "Failed after fix attempts";
             Log(m_Status, true);
             return;
         }
         ++m_FixAttempts;
         m_Status = "Fix attempt " + std::to_string(m_FixAttempts);
-        std::string sys =
-            "Fix the Muk game. Output ACTION lines and/or BEGIN_SCRIPT...END_SCRIPT.\n"
-            "Address every ISSUE.";
-        std::string user = m_LastIssues + "\nBrief: " + m_Brief +
-                           "\nCurrent script:\n" + m_ScriptSource;
-        auto resp = m_Team.AskRole(AgentRole::Builder, sys, user, 0.3f);
-        if (!resp.Success) {
-            m_Phase = AgentPhase::Failed; m_Status = resp.Error; return;
-        }
+        std::string sys = "Fix issues. Output ACTIONs and/or BEGIN_SCRIPT...END_SCRIPT.";
+        auto resp = m_Team.AskRole(AgentRole::Builder, sys, m_LastIssues + "\n" + m_Brief, 0.3f);
+        if (!resp.Success) { m_Phase = AgentPhase::Failed; m_Status = resp.Error; return; }
         ApplyActions(world, renderer, audio, entities, selected, resp.Content);
         auto sc = ExtractScript(resp.Content);
-        if (!sc.empty()) {
-            m_ScriptSource = sc;
-            m_Runtime.SetActiveScript(sc);
-        }
+        if (!sc.empty()) { m_ScriptSource = sc; m_Runtime.SetActiveScript(sc); }
         m_LastIssues.clear();
         m_Phase = AgentPhase::Previewing;
     }
@@ -525,42 +476,43 @@ void AIGameAgent::DrawImGui() {
 #ifdef MUK_USE_IMGUI
     ImGui::Begin("AI Game Builder");
     ImGui::TextWrapped(
-        "Multi-agent pipeline (Architect/Builder/Scripter/Critic). "
-        "Uses OpenRouter + NVIDIA together when both keys are set. "
-        "Writes scenes, levels, Muk Script gameplay, UI, then verifies and playtests.");
+        "Multi-agent pipeline: Architect, Builder, Scripter, Critic. "
+        "OpenRouter + NVIDIA work together when both keys are set. "
+        "Produces levels, scene, Muk Script gameplay, UI, verify, playtest.");
     ImGui::Checkbox("Prefer dual providers", &m_UseDual);
     if (m_Team.HasDualProviders())
-        ImGui::TextColored(ImVec4(0.3f, 1, 0.4f, 1), "Dual AI: OpenRouter + NVIDIA");
+        ImGui::TextColored(ImVec4(0.3f, 1, 0.4f, 1), "Dual AI ready (OpenRouter + NVIDIA)");
     else
-        ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "Add both API keys for dual-agent mode");
+        ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "Tip: set BOTH OpenRouter and NVIDIA keys for dual-agent");
 
     ImGui::InputTextMultiline("##brief", m_BriefEdit, sizeof(m_BriefEdit), ImVec2(-1, 70));
     if (!IsBusy()) {
         if (ImGui::Button("Build complete game with AI"))
             StartBuild(m_BriefEdit);
+        ImGui::SameLine();
+        if (ImGui::Button("Run script now") && !m_ScriptSource.empty()) {
+            m_Phase = AgentPhase::Playtesting;
+            m_PlayTestTimer = 60.0f;
+            m_Status = "Manual play — WASD";
+        }
     } else {
         if (ImGui::Button("Cancel")) Cancel();
     }
-    ImGui::SameLine();
     ImGui::TextWrapped("%s", m_Status.c_str());
 
     if (ImGui::CollapsingHeader("Team roles")) {
-        for (auto& s : m_Team.Slots()) {
-            ImGui::Text("%s → %s (%s)", s.Label.c_str(), s.Provider.c_str(),
-                        s.Model.empty() ? "default" : s.Model.c_str());
-        }
+        for (auto& s : m_Team.Slots())
+            ImGui::Text("%s → %s", s.Label.c_str(), s.Provider.c_str());
     }
-    if (ImGui::CollapsingHeader("Gameplay script")) {
-        ImGui::TextUnformatted(m_ScriptSource.empty() ? "(none yet)" : m_ScriptSource.c_str());
-    }
-    if (ImGui::CollapsingHeader("Levels")) {
+    if (ImGui::CollapsingHeader("Gameplay script"))
+        ImGui::TextUnformatted(m_ScriptSource.empty() ? "(none)" : m_ScriptSource.c_str());
+    if (ImGui::CollapsingHeader("Levels"))
         for (auto& L : m_Runtime.Levels())
-            ImGui::BulletText("%s (%s)", L.Id.c_str(), L.Name.c_str());
-    }
+            ImGui::BulletText("%s — %s", L.Id.c_str(), L.Name.c_str());
 
-    // Runtime HUD
     for (auto& u : m_Runtime.UI())
-        if (u.Visible) ImGui::TextColored(ImVec4(0.7f, 0.9f, 1, 1), "[UI %s] %s", u.Id.c_str(), u.Text.c_str());
+        if (u.Visible)
+            ImGui::TextColored(ImVec4(0.7f, 0.9f, 1, 1), "[UI %s] %s", u.Id.c_str(), u.Text.c_str());
     if (!m_Runtime.Banner().empty())
         ImGui::TextColored(ImVec4(1, 0.9f, 0.2f, 1), "%s", m_Runtime.Banner().c_str());
 
