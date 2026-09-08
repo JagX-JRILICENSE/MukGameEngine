@@ -43,9 +43,10 @@ public:
     void SetCamera(const CameraView& camera);
     void SetDirectionalLight(const Vec3& dir, const Vec3& color, f32 intensity, f32 ambient);
 
-    // Shadow pass: call with a function that DrawMesh's all casters
-    void BeginShadowPass(const Vec3& focus, f32 radius = 20.0f);
+    void BeginShadowPass(const Vec3& focus, f32 radius = 40.0f);
     void EndShadowPass();
+    // Preferred: fills all 3 cascades
+    void RenderAllShadowCascades(const std::function<void()>& drawScene);
     bool ShadowsEnabled() const;
 
     void DrawMesh(const std::string& meshName, const Mat4& world, const Material& material);
@@ -80,6 +81,10 @@ private:
     Vec3 m_LightColor{1.0f, 0.98f, 0.92f};
     f32 m_LightIntensity = 1.2f;
     f32 m_Ambient = 0.18f;
+
+    Vec3 m_ShadowFocus{0, 0, 0};
+    f32 m_ShadowRadius = 40.0f;
+    u32 m_ShadowCascadeIndex = 0;
 
     u32 m_Width = 1;
     u32 m_Height = 1;
