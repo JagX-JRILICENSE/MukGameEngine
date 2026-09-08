@@ -36,29 +36,25 @@ void ParticleSystem::Update(float dt) {
         if (!p.Alive) continue;
         p.Life -= dt;
         if (p.Life <= 0) { p.Alive = false; continue; }
-        p.Velocity.y -= 4.0f * dt; // gravity
+        p.Velocity.y -= 4.0f * dt;
         p.Position.x += p.Velocity.x * dt;
         p.Position.y += p.Velocity.y * dt;
         p.Position.z += p.Velocity.z * dt;
     }
-    // compact occasionally
     if (m_Particles.size() > 512) {
         std::vector<Particle> live;
-        live.reserve(m_Particles.size() / 2);
         for (auto& p : m_Particles) if (p.Alive) live.push_back(p);
         m_Particles.swap(live);
     }
 }
 
 void ParticleSystem::Render(Renderer& renderer) {
-    Material mat = Material::CreateDefault();
     for (auto& p : m_Particles) {
         if (!p.Alive) continue;
         float t = p.Life / p.MaxLife;
         float s = p.Size * (0.5f + 0.5f * t);
         Mat4 world = Mat4::Translation(p.Position) * Mat4::Scale({ s, s, s });
-        // tint via material albedo if available
-        mat.Albedo = { p.Color.x, p.Color.y, p.Color.z, t };
+        Material mat = Material::CreateUnlit({ p.Color.x, p.Color.y, p.Color.z, t });
         renderer.DrawMesh("Cube", world, mat);
     }
 }
