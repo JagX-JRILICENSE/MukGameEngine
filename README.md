@@ -1,8 +1,8 @@
 # Muk Game Engine
 
-**Muk Game Engine** is a next-generation, high-performance game engine designed to rival Unreal Engine, Unity, Godot, and other industry leaders. Built from the ground up with modern C++20/23, it aims for maximum performance, developer productivity, and visual fidelity on Windows (with cross-platform expansion planned).
+**Muk Game Engine** is a next-generation, high-performance game engine designed to rival Unreal Engine, Unity, Godot, and other industry leaders. Built from the ground up with modern C++20, it aims for maximum performance, developer productivity, and visual fidelity on Windows (with cross-platform expansion planned).
 
-> 🚀 **Status**: Early foundation stage. Architecture and core systems are being established. Contributions welcome!
+> 🚀 **Status**: Foundation + Core Systems in active development. DX12 path is live.
 
 ## Vision
 
@@ -10,69 +10,100 @@ Muk aims to deliver:
 
 - **Unreal-level rendering**: Deferred + Forward+, Nanite-inspired virtualized geometry, Lumen-style global illumination, ray tracing support
 - **Powerful Editor**: Full visual editor with viewport, outliner, details panel, content browser, Blueprint-like visual scripting
-- **ECS-first architecture**: High-performance Entity Component System (EnTT or custom)
-- **Physics**: Jolt or Chaos-inspired rigid body, soft body, destruction, vehicles
+- **ECS-first architecture**: High-performance Entity Component System
+- **Physics**: Jolt-ready rigid body system (simple solver now, full Jolt later)
 - **Animation**: Skeletal animation, IK, state machines, blend spaces
 - **Audio**: Spatial 3D audio, occlusion, reverb zones
 - **Networking**: Client-server, replication, prediction
 - **Scripting**: C++ + Lua / AngelScript / Visual Scripting
-- **Tools**: Asset pipeline, material editor, particle editor (Niagara-like), sequencer
-- **Platform**: Primary target Windows (DirectX 12 / Vulkan), later Linux, macOS, consoles
+- **Tools**: Asset pipeline, material editor, particle editor, sequencer
+- **Platform**: Primary target Windows (DirectX 12), later Linux, macOS, consoles
 
-## Core Architecture (Planned / In Progress)
+## What Works Right Now
+
+### Step 1 – Real DirectX 12 RHI
+- Device creation (hardware + WARP fallback)
+- Command queue, allocators, graphics command list
+- Flip-model swapchain
+- RTV heap + double buffering
+- Frame synchronization with fences
+- Clear color + viewport/scissor
+- Resize support
+
+### Step 2 – Forward Renderer + Meshes
+- `Mesh` class with Vertex format (Position, Normal, TexCoord, Color)
+- Built-in primitives: **Triangle**, **Cube**, **Quad**
+- `Renderer::DrawMesh()` submission API (GPU path next)
+- Dark clear color so you can see the window is alive
+
+### Step 3 – Physics
+- `PhysicsWorld` with create/destroy body API
+- Body types: Static / Dynamic / Kinematic
+- Shapes: Box, Sphere, Capsule
+- Gravity + simple Euler integration + ground plane collision
+- Designed so **Jolt Physics** can replace the solver with minimal API changes
+- `RigidBodyComponent` for ECS linking
+
+### Step 4 – Editor Foundation
+- `MukEditor` executable
+- Hierarchy seed entities (Camera, Light, Floor, Player Start)
+- Viewport / Details / Content Browser layout planned (ImGui next)
+- Physics test body spawned on editor start
+
+### Step 5 – Assets & Materials
+- `AssetManager` with builtin meshes & materials
+- PBR-ready `Material` (BaseColor, Metallic, Roughness, Emissive + texture slots)
+- `LoadMeshFromGLTF()` interface ready for tinygltf / cgltf
+
+## Architecture
 
 ```
 MukGameEngine/
 ├── Engine/
-│   ├── Core/           # Platform abstraction, logging, memory, math, reflection
-│   ├── RHI/            # Rendering Hardware Interface (DX12, Vulkan, later Metal)
-│   ├── Renderer/       # Deferred renderer, GI, shadows, post-process, Nanite-like
-│   ├── ECS/            # Entity Component System
-│   ├── Physics/        # Rigid body, collision, constraints
-│   ├── Animation/      # Skeletal, IK, animation graphs
-│   ├── Audio/          # Spatial audio system
-│   ├── Input/          # Action mapping, devices
-│   ├── Networking/     # Multiplayer replication
-│   ├── Scripting/      # Lua / visual scripting
-│   ├── Asset/          # Asset management & pipeline
-│   ├── UI/             # Immediate + retained mode UI
-│   └── World/          # Scene, levels, streaming
-├── Editor/             # Muk Editor (ImGui / custom)
-├── Runtime/            # Game runtime executable
-├── Plugins/            # Modular plugins
-├── ThirdParty/         # Dependencies
-├── Samples/            # Example projects
-├── Docs/               # Documentation
-└── Tools/              # Build tools, asset converters
+│   ├── Core/           Application, Window (Win32), Log
+│   ├── Math/           Vec2/3/4, Mat4
+│   ├── RHI/            Abstraction + DX12 backend
+│   ├── Renderer/       Mesh, Material, Renderer
+│   ├── ECS/            Entity, World, Components
+│   ├── Physics/        PhysicsWorld (Jolt-ready)
+│   ├── Asset/          AssetManager
+│   └── Input/
+├── Editor/             Muk Editor
+├── Runtime/            Game / Sandbox executable
+├── Samples/
+└── CMakeLists.txt
 ```
 
 ## Features Roadmap
 
-### Phase 1 – Foundation (Current)
+### Phase 1 – Foundation ✅
 - [x] Repository & project structure
-- [ ] Platform layer (Windows window, input, file system)
-- [ ] Math library (vectors, matrices, quaternions)
-- [ ] Logging & assert system
-- [ ] Basic RHI (DirectX 12 primary)
-- [ ] Simple forward renderer
-- [ ] ECS core
-- [ ] CMake build system for Windows
+- [x] Platform layer (Windows window)
+- [x] Math library
+- [x] Logging system
+- [x] DirectX 12 RHI (device, swapchain, frames)
+- [x] Simple forward renderer structure
+- [x] ECS core
+- [x] CMake build system for Windows
 
-### Phase 2 – Core Systems
-- [ ] Deferred rendering pipeline
-- [ ] PBR materials
+### Phase 2 – Core Systems (In Progress)
+- [x] Mesh primitives + Material system
+- [x] Physics abstraction + simple solver
+- [x] AssetManager + glTF interface
+- [ ] Full triangle draw with vertex/index buffers + shaders
+- [ ] PBR shading
 - [ ] Shadow mapping
-- [ ] Physics integration (Jolt recommended)
+- [ ] Real Jolt Physics integration
 - [ ] Skeletal animation
-- [ ] Audio (miniaudio / OpenAL)
-- [ ] Asset loading (glTF, FBX later)
+- [ ] Audio
 
 ### Phase 3 – Editor & Tools
-- [ ] Muk Editor (viewport, hierarchy, inspector)
+- [x] Editor host + entity hierarchy seed
+- [ ] Dear ImGui docking (Viewport, Hierarchy, Details)
 - [ ] Content browser
 - [ ] Material graph editor
-- [ ] Visual scripting (node-based)
-- [ ] Sequencer / timeline
+- [ ] Visual scripting
+- [ ] Sequencer
 
 ### Phase 4 – Advanced
 - [ ] Virtualized geometry (Nanite-inspired)
@@ -86,10 +117,9 @@ MukGameEngine/
 
 ### Prerequisites
 - Windows 10/11
-- Visual Studio 2022 (with C++ Desktop Development workload)
+- Visual Studio 2022 (C++ Desktop Development workload)
 - CMake 3.25+
 - Git
-- (Optional) Vulkan SDK
 
 ### Build Steps
 ```bash
@@ -100,56 +130,61 @@ cmake .. -G "Visual Studio 17 2022" -A x64
 cmake --build . --config Release
 ```
 
-The Runtime and Editor executables will appear in `build/bin/`.
+Executables appear in `build/bin/`:
+- `MukRuntime.exe` – Sandbox / game host
+- `MukEditor.exe` – Editor host
 
-## Getting Started (Once Core is Ready)
+You should see a dark blue-gray window (DX12 clear color). Physics bodies are simulated in the background.
+
+## Quick Example
 
 ```cpp
-#include <Muk/Engine.h>
+#include "Engine.h"
+
+using namespace Muk;
+
+class MyGame : public Application {
+protected:
+    void OnInit() override {
+        auto entity = ECS().CreateEntity();
+        auto& t = ECS().AddComponent<Transform>(entity);
+        t.Position = {0, 2, 0};
+
+        RigidBodyDesc desc;
+        desc.Type = BodyType::Dynamic;
+        desc.Shape = ShapeType::Box;
+        desc.Position = {0, 5, 0};
+        Physics().CreateBody(desc);
+    }
+
+    void OnRender() override {
+        auto mesh = Assets().GetMesh("Cube");
+        auto mat  = Assets().GetMaterial("Default");
+        if (mesh && mat)
+            Renderer().DrawMesh(*mesh, Mat4::Identity(), *mat);
+    }
+};
 
 int main() {
-    Muk::Engine engine;
-    engine.Initialize({
-        .windowTitle = "Muk Game Engine",
-        .width = 1920,
-        .height = 1080
-    });
-
-    // Create a simple scene
-    auto& world = engine.GetWorld();
-    auto entity = world.CreateEntity();
-    world.AddComponent<Muk::Transform>(entity);
-    world.AddComponent<Muk::MeshRenderer>(entity, "Models/Cube.glb");
-
-    engine.Run();
-    return 0;
+    MyGame app;
+    app.Run();
 }
 ```
 
 ## License
 
-Muk Game Engine is released under the **MIT License**. You are free to use it for commercial and non-commercial projects.
+MIT License — free for commercial and non-commercial use.
 
 ## Contributing
 
-This is an ambitious open project. Help is welcome in:
-- Core systems implementation
-- Rendering techniques
-- Editor UX
-- Documentation
-- Samples
+Help is welcome on:
+- Completing the DX12 triangle (root signature, PSO, vertex buffers)
+- ImGui editor panels
+- Jolt Physics integration
+- glTF loading (tinygltf)
+- Documentation & samples
 
-Please open issues and pull requests.
-
-## Acknowledgments
-
-Inspired by:
-- Unreal Engine (Epic Games)
-- Godot Engine
-- ezEngine
-- Spark Engine
-- Bevy / Flecs philosophy
-- Modern RHI designs (bgfx, dawn, wgpu)
+Open issues and pull requests!
 
 ---
 
