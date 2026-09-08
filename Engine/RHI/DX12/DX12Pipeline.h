@@ -2,13 +2,14 @@
 
 #include <d3d12.h>
 #include <wrl/client.h>
-#include <vector>
 #include <string>
 #include <unordered_map>
 #include <memory>
 #include "Core/Core.h"
 #include "Renderer/Mesh.h"
+#include "Renderer/Material.h"
 #include "Math/Matrix.h"
+#include "DX12Texture.h"
 
 namespace Muk {
 
@@ -22,23 +23,29 @@ struct GPUMeshBuffers {
     u32 IndexCount = 0;
 };
 
-/**
- * Root signature, depth-tested PSO, constant buffer, multi-mesh GPU cache.
- */
+struct FrameCB {
+    float MVP[16];
+    float BaseColor[4];
+    float UseTexture; // 1 = sample albedo
+    float Pad[3];
+};
+
 class DX12Pipeline {
 public:
-    bool Initialize(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_FORMAT depthFormat);
+    bool Initialize(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_FORMAT depthFormat,
+                    ID3D12DescriptorHeap* srvHeap, u32 srvSize, u32* srvNext, u32 srvMax);
     void Shutdown();
 
-    // Cache by name - returns true if newly uploaded or already cached
     bool UploadMesh(ID3D12Device* device, const std::string& name, const Mesh& mesh);
+    bool UploadTexture(ID3D12Device* device, const std::string& name, const Texture& tex);
     bool HasMesh(const std::string& name) const;
 
     void Bind(ID3D12GraphicsCommandList* cmdList);
-    void SetMVP(const Mat4& mvp);
+    void SetMaterialParams(const Mat4& mvp, const Material& material);
     void DrawMesh(ID3D12GraphicsCommandList* cmdList, const std::string& name);
 
     bool IsReady() const { return m_Ready; }
+    DX12TextureCache& Textures() { return m_Textures; }
 
 private:
     bool CreateRootSignature(ID3D12Device* device);
@@ -51,6 +58,7 @@ private:
     void* m_CBMapped = nullptr;
 
     std::unordered_map<std::string, std::unique_ptr<GPUMeshBuffers>> m_MeshCache;
+    DX12TextureCache m_Textures;
     bool m_Ready = false;
 };
 
