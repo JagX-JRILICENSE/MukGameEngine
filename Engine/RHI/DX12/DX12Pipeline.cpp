@@ -8,22 +8,25 @@
 
 namespace Muk {
 
-static const char* g_EmbeddedHLSL = R"(
+static const char* g_LitHLSL = R"(
 cbuffer FrameConstants : register(b0)
 {
     float4x4 MVP;
     float4x4 World;
+    float4x4 LightVP;
     float4   BaseColor;
-    float4   LightDir;    // xyz dir, w intensity
-    float4   LightColor;  // rgb, w ambient
+    float4   LightDir;
+    float4   LightColor;
     float    UseTexture;
     float    Metallic;
     float    Roughness;
-    float    Pad;
+    float    ReceiveShadows;
 };
 
 Texture2D    AlbedoTex : register(t0);
+Texture2D    ShadowMap : register(t1);
 SamplerState AlbedoSam : register(s0);
+SamplerComparisonState ShadowSam : register(s1);
 
 struct VSInput {
     float3 Position : POSITION;
@@ -36,16 +39,27 @@ struct PSInput {
     float3 NormalWS : NORMAL;
     float4 Color    : COLOR;
     float2 TexCoord : TEXCOORD;
+    float4 ShadowPos : TEXCOORD1;
 };
 
 PSInput VSMain(VSInput input) {
     PSInput o;
+    float4 wp = mul(float4(input.Position, 1.0f), World);
     o.Position = mul(float4(input.Position, 1.0f), MVP);
-    float3 n = mul(float4(input.Normal, 0.0f), World).xyz;
-    o.NormalWS = normalize(n);
+    o.NormalWS = normalize(mul(float4(input.Normal, 0.0f), World).xyz);
     o.Color = input.Color;
     o.TexCoord = input.TexCoord;
+    o.ShadowPos = mul(wp, LightVP);
     return o;
+}
+
+float SampleShadow(float4 sp) {
+    float3 proj = sp.xyz / sp.w;
+    float2 uv = proj.xy * 0.5f + 0.5f;
+    uv.y = 1.0f - uv.y;
+    if (uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) return 1.0f;
+    float bias = 0.002f;
+    return ShadowMap.SampleCmpLevelZero(ShadowSam, uv, proj.z - bias);
 }
 
 float4 PSMain(PSInput input) : SV_TARGET {
@@ -56,21 +70,52 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float3 N = normalize(input.NormalWS);
     float3 L = normalize(-LightDir.xyz);
     float ndotl = saturate(dot(N, L));
-
-    // Cheap “roughness”: blend toward softer light
     float diffuse = lerp(ndotl, ndotl * 0.5 + 0.5, saturate(Roughness));
-    float3 lit = albedo.rgb * LightColor.rgb * (LightDir.w * diffuse + LightColor.w);
-    // Metallic: tint specular-ish boost (simple)
-    lit += albedo.rgb * Metallic * LightColor.rgb * ndotl * 0.35;
 
+    float shadow = 1.0f;
+    if (ReceiveShadows > 0.5f)
+        shadow = SampleShadow(input.ShadowPos);
+
+    float3 lit = albedo.rgb * LightColor.rgb * (LightDir.w * diffuse * shadow + LightColor.w);
+    lit += albedo.rgb * Metallic * LightColor.rgb * ndotl * shadow * 0.35;
     return float4(lit, albedo.a);
 }
+)";
+
+static const char* g_ShadowHLSL = R"(
+cbuffer FrameConstants : register(b0)
+{
+    float4x4 MVP;
+    float4x4 World;
+    float4x4 LightVP;
+    float4   BaseColor;
+    float4   LightDir;
+    float4   LightColor;
+    float    UseTexture;
+    float    Metallic;
+    float    Roughness;
+    float    ReceiveShadows;
+};
+
+struct VSInput {
+    float3 Position : POSITION;
+    float3 Normal   : NORMAL;
+    float2 TexCoord : TEXCOORD;
+    float4 Color    : COLOR;
+};
+
+float4 VSMain(VSInput input) : SV_POSITION {
+    return mul(float4(input.Position, 1.0f), MVP);
+}
+
+void PSMain() {}
 )";
 
 bool DX12Pipeline::Initialize(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_FORMAT depthFormat,
                               ID3D12DescriptorHeap* srvHeap, u32 srvSize, u32* srvNext, u32 srvMax) {
     if (!CreateRootSignature(device)) return false;
-    if (!CreatePipelineState(device, rtvFormat, depthFormat)) return false;
+    if (!CreateLitPSO(device, rtvFormat, depthFormat)) return false;
+    if (!CreateShadowPSO(device)) return false;
     m_Textures.Initialize(device, srvHeap, srvSize, srvNext, srvMax);
 
     D3D12_HEAP_PROPERTIES heapProps = {};
@@ -90,7 +135,7 @@ bool DX12Pipeline::Initialize(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_
 
     m_ConstantBuffer->Map(0, nullptr, &m_CBMapped);
     m_Ready = true;
-    MUK_CORE_INFO("DX12Pipeline ready (lit + textured)");
+    MUK_CORE_INFO("DX12Pipeline ready (lit + shadows)");
     return true;
 }
 
@@ -102,38 +147,54 @@ void DX12Pipeline::Shutdown() {
     m_Textures.Shutdown();
     m_MeshCache.clear();
     m_ConstantBuffer.Reset();
-    m_PipelineState.Reset();
+    m_LitPSO.Reset();
+    m_ShadowPSO.Reset();
     m_RootSignature.Reset();
     m_Ready = false;
 }
 
 bool DX12Pipeline::CreateRootSignature(ID3D12Device* device) {
-    D3D12_DESCRIPTOR_RANGE srvRange = {};
-    srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srvRange.NumDescriptors = 1;
-    srvRange.BaseShaderRegister = 0;
+    D3D12_DESCRIPTOR_RANGE ranges[2] = {};
+    ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    ranges[0].NumDescriptors = 1;
+    ranges[0].BaseShaderRegister = 0;
+    ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    ranges[1].NumDescriptors = 1;
+    ranges[1].BaseShaderRegister = 1;
 
-    D3D12_ROOT_PARAMETER params[2] = {};
+    D3D12_ROOT_PARAMETER params[3] = {};
     params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     params[0].Descriptor.ShaderRegister = 0;
     params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     params[1].DescriptorTable.NumDescriptorRanges = 1;
-    params[1].DescriptorTable.pDescriptorRanges = &srvRange;
+    params[1].DescriptorTable.pDescriptorRanges = &ranges[0];
     params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
-    D3D12_STATIC_SAMPLER_DESC sampler = {};
-    sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-    sampler.ShaderRegister = 0;
-    sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    params[2].DescriptorTable.NumDescriptorRanges = 1;
+    params[2].DescriptorTable.pDescriptorRanges = &ranges[1];
+    params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_STATIC_SAMPLER_DESC samplers[2] = {};
+    samplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    samplers[0].AddressU = samplers[0].AddressV = samplers[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    samplers[0].ShaderRegister = 0;
+    samplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    samplers[1].Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    samplers[1].AddressU = samplers[1].AddressV = samplers[1].AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    samplers[1].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    samplers[1].BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    samplers[1].ShaderRegister = 1;
+    samplers[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
-    rsDesc.NumParameters = 2;
+    rsDesc.NumParameters = 3;
     rsDesc.pParameters = params;
-    rsDesc.NumStaticSamplers = 1;
-    rsDesc.pStaticSamplers = &sampler;
+    rsDesc.NumStaticSamplers = 2;
+    rsDesc.pStaticSamplers = samplers;
     rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
     ComPtr<ID3DBlob> signature, error;
@@ -143,13 +204,13 @@ bool DX12Pipeline::CreateRootSignature(ID3D12Device* device) {
                       signature->GetBufferSize(), IID_PPV_ARGS(&m_RootSignature)));
 }
 
-bool DX12Pipeline::CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outBlob) {
+bool DX12Pipeline::CompileShader(const char* source, const char* entry, const char* target, ComPtr<ID3DBlob>& outBlob) {
     ComPtr<ID3DBlob> error;
     UINT flags = 0;
 #ifdef _DEBUG
     flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 #endif
-    HRESULT hr = D3DCompile(g_EmbeddedHLSL, std::strlen(g_EmbeddedHLSL), "Lit.hlsl",
+    HRESULT hr = D3DCompile(source, std::strlen(source), "shader",
                             nullptr, nullptr, entry, target, flags, 0, &outBlob, &error);
     if (FAILED(hr)) {
         if (error) MUK_CORE_ERROR("Shader: {0}", (const char*)error->GetBufferPointer());
@@ -158,38 +219,72 @@ bool DX12Pipeline::CompileShader(const char* entry, const char* target, ComPtr<I
     return true;
 }
 
-bool DX12Pipeline::CreatePipelineState(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_FORMAT depthFormat) {
-    ComPtr<ID3DBlob> vsBlob, psBlob;
-    if (!CompileShader("VSMain", "vs_5_0", vsBlob)) return false;
-    if (!CompileShader("PSMain", "ps_5_0", psBlob)) return false;
+bool DX12Pipeline::CreateLitPSO(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_FORMAT depthFormat) {
+    ComPtr<ID3DBlob> vs, ps;
+    if (!CompileShader(g_LitHLSL, "VSMain", "vs_5_0", vs)) return false;
+    if (!CompileShader(g_LitHLSL, "PSMain", "ps_5_0", ps)) return false;
 
-    D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
+    D3D12_INPUT_ELEMENT_DESC layout[] = {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
         { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
         { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
     };
 
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.pRootSignature = m_RootSignature.Get();
-    psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
-    psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
-    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-    psoDesc.SampleMask = UINT_MAX;
-    psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
-    psoDesc.RasterizerState.DepthClipEnable = TRUE;
-    psoDesc.DepthStencilState.DepthEnable = TRUE;
-    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-    psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-    psoDesc.DSVFormat = depthFormat;
-    psoDesc.InputLayout = { inputLayout, _countof(inputLayout) };
-    psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = rtvFormat;
-    psoDesc.SampleDesc.Count = 1;
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
+    pso.pRootSignature = m_RootSignature.Get();
+    pso.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    pso.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
+    pso.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    pso.SampleMask = UINT_MAX;
+    pso.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    pso.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+    pso.RasterizerState.DepthClipEnable = TRUE;
+    pso.DepthStencilState.DepthEnable = TRUE;
+    pso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    pso.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    pso.DSVFormat = depthFormat;
+    pso.InputLayout = { layout, _countof(layout) };
+    pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    pso.NumRenderTargets = 1;
+    pso.RTVFormats[0] = rtvFormat;
+    pso.SampleDesc.Count = 1;
+    return SUCCEEDED(device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_LitPSO)));
+}
 
-    return SUCCEEDED(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_PipelineState)));
+bool DX12Pipeline::CreateShadowPSO(ID3D12Device* device) {
+    ComPtr<ID3DBlob> vs, ps;
+    if (!CompileShader(g_ShadowHLSL, "VSMain", "vs_5_0", vs)) return false;
+    if (!CompileShader(g_ShadowHLSL, "PSMain", "ps_5_0", ps)) return false;
+
+    D3D12_INPUT_ELEMENT_DESC layout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    };
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
+    pso.pRootSignature = m_RootSignature.Get();
+    pso.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    pso.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
+    pso.BlendState.RenderTarget[0].RenderTargetWriteMask = 0;
+    pso.SampleMask = UINT_MAX;
+    pso.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    pso.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+    pso.RasterizerState.DepthBias = 1000;
+    pso.RasterizerState.DepthBiasClamp = 0.0f;
+    pso.RasterizerState.SlopeScaledDepthBias = 1.5f;
+    pso.RasterizerState.DepthClipEnable = TRUE;
+    pso.DepthStencilState.DepthEnable = TRUE;
+    pso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    pso.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    pso.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    pso.InputLayout = { layout, _countof(layout) };
+    pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    pso.NumRenderTargets = 0;
+    pso.SampleDesc.Count = 1;
+    return SUCCEEDED(device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_ShadowPSO)));
 }
 
 bool DX12Pipeline::HasMesh(const std::string& name) const {
@@ -236,7 +331,6 @@ bool DX12Pipeline::UploadMesh(ID3D12Device* device, const std::string& name, con
     gpu->IBV.SizeInBytes = (UINT)ibSize;
     gpu->IBV.Format = DXGI_FORMAT_R32_UINT;
     gpu->IndexCount = (u32)indices.size();
-
     m_MeshCache[name] = std::move(gpu);
     return true;
 }
@@ -245,20 +339,30 @@ bool DX12Pipeline::UploadTexture(ID3D12Device* device, const std::string& name, 
     return m_Textures.Upload(device, nullptr, nullptr, name, tex);
 }
 
-void DX12Pipeline::Bind(ID3D12GraphicsCommandList* cmdList) {
+void DX12Pipeline::BindLit(ID3D12GraphicsCommandList* cmdList) {
     cmdList->SetGraphicsRootSignature(m_RootSignature.Get());
-    cmdList->SetPipelineState(m_PipelineState.Get());
+    cmdList->SetPipelineState(m_LitPSO.Get());
     cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->SetGraphicsRootConstantBufferView(0, m_ConstantBuffer->GetGPUVirtualAddress());
     cmdList->SetGraphicsRootDescriptorTable(1, m_Textures.GetWhiteSrv());
 }
 
-void DX12Pipeline::SetDrawParams(const Mat4& mvp, const Mat4& world, const Material& material,
-                                 const Vec3& lightDir, const Vec3& lightColor, f32 intensity, f32 ambient) {
+void DX12Pipeline::BindShadow(ID3D12GraphicsCommandList* cmdList) {
+    cmdList->SetGraphicsRootSignature(m_RootSignature.Get());
+    cmdList->SetPipelineState(m_ShadowPSO.Get());
+    cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmdList->SetGraphicsRootConstantBufferView(0, m_ConstantBuffer->GetGPUVirtualAddress());
+}
+
+void DX12Pipeline::SetDrawParams(const Mat4& mvp, const Mat4& world, const Mat4& lightVP,
+                                 const Material& material,
+                                 const Vec3& lightDir, const Vec3& lightColor, f32 intensity, f32 ambient,
+                                 bool receiveShadows) {
     if (!m_CBMapped) return;
     FrameCB cb = {};
     std::memcpy(cb.MVP, mvp.m, sizeof(float) * 16);
     std::memcpy(cb.World, world.m, sizeof(float) * 16);
+    std::memcpy(cb.LightVP, lightVP.m, sizeof(float) * 16);
     cb.BaseColor[0] = material.BaseColor.x;
     cb.BaseColor[1] = material.BaseColor.y;
     cb.BaseColor[2] = material.BaseColor.z;
@@ -281,6 +385,7 @@ void DX12Pipeline::SetDrawParams(const Mat4& mvp, const Mat4& world, const Mater
     cb.UseTexture = (!key.empty() && m_Textures.Has(key)) ? 1.0f : 0.0f;
     cb.Metallic = material.Metallic;
     cb.Roughness = material.Roughness;
+    cb.ReceiveShadows = receiveShadows ? 1.0f : 0.0f;
     std::memcpy(m_CBMapped, &cb, sizeof(FrameCB));
 }
 
