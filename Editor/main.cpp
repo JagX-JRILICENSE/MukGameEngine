@@ -5,7 +5,10 @@
 #include "Physics/CharacterController.h"
 #include "Core/Profiler.h"
 #include "RHI/DX12/DX12RHI.h"
-#include "Input/Input.h"
+
+#ifdef MUK_PLATFORM_WINDOWS
+#include <Windows.h>
+#endif
 
 #ifdef MUK_USE_IMGUI
 #include <imgui.h>
@@ -25,7 +28,6 @@ protected:
         cam.Target = {0.0f, 0.5f, 0.0f};
         Renderer().SetCamera(cam);
 
-        // Sun
         {
             auto e = ECS().CreateEntity();
             ECS().AddComponent<NameComponent>(e).Name = "Sun";
@@ -36,7 +38,6 @@ protected:
             Track(e, "Sun");
         }
 
-        // Floor (static physics)
         {
             auto e = ECS().CreateEntity();
             ECS().AddComponent<NameComponent>(e).Name = "Floor";
@@ -57,7 +58,6 @@ protected:
             ECS().AddComponent<RigidBodyComponent>(e).BodyId = bodyId;
         }
 
-        // Cubes
         {
             auto e = ECS().CreateEntity();
             ECS().AddComponent<NameComponent>(e).Name = "Cube";
@@ -81,7 +81,6 @@ protected:
             Track(e, "Triangle");
         }
 
-        // Character
         {
             CharacterDesc cd;
             cd.Position = {0, 1.0f, 2};
@@ -125,11 +124,10 @@ protected:
 
         m_UI.Log(Physics().IsUsingJolt()
             ? "Jolt CharacterVirtual + shadows + ImGuizmo ready"
-            : "Simple character + shadows + ImGuizmo ready (enable MUK_USE_JOLT for Jolt)");
+            : "Simple character + shadows + ImGuizmo (build -DMUK_USE_JOLT=ON for Jolt)");
     }
 
     void OnUpdate(float dt) override {
-        // WASD + Space for character
         Vec3 wish{0, 0, 0};
 #ifdef MUK_PLATFORM_WINDOWS
         if (GetAsyncKeyState('W') & 0x8000) wish.z += 1;
@@ -169,12 +167,10 @@ protected:
             });
         };
 
-        // Shadow pass
         Renderer().BeginShadowPass({0, 0, 0}, 18.0f);
         drawScene();
         Renderer().EndShadowPass();
 
-        // Scene RT (viewport)
         u32 vw = m_UI.GetDesiredViewportWidth();
         u32 vh = m_UI.GetDesiredViewportHeight();
         Renderer().EnsureSceneRT(vw, vh);
@@ -184,8 +180,6 @@ protected:
 
         m_UI.DrawViewport(Renderer(), Renderer().GetSceneRTGpuHandle(),
                           Renderer().GetSceneRTWidth(), Renderer().GetSceneRTHeight());
-
-        // Gizmo over viewport
         DrawViewportGizmo();
 
         m_UI.RenderDrawData();
