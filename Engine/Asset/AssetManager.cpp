@@ -1,4 +1,5 @@
 #include "AssetManager.h"
+#include "GltfLoader.h"
 #include "Core/Log.h"
 
 namespace Muk {
@@ -16,12 +17,10 @@ void AssetManager::Shutdown() {
 }
 
 void AssetManager::RegisterBuiltinAssets() {
-    // Meshes
     CreateMesh("Triangle", Mesh::CreateTriangle());
     CreateMesh("Cube", Mesh::CreateCube());
     CreateMesh("Quad", Mesh::CreateQuad());
 
-    // Materials
     CreateMaterial("Default", Material::CreateDefault());
     CreateMaterial("Red", Material::CreateUnlit({1, 0, 0, 1}));
     CreateMaterial("Green", Material::CreateUnlit({0, 1, 0, 1}));
@@ -44,10 +43,14 @@ std::shared_ptr<Mesh> AssetManager::CreateMesh(const std::string& name, Mesh mes
 }
 
 std::shared_ptr<Mesh> AssetManager::LoadMeshFromGLTF(const std::string& path) {
-    // TODO: Integrate tinygltf or cgltf
-    // For now just log and return a cube as fallback
-    MUK_CORE_WARN("glTF loading not yet implemented. Path: {0}. Returning Cube.", path.c_str());
-    return GetMesh("Cube");
+    auto mesh = GltfLoader::Load(path);
+    if (!mesh) {
+        MUK_CORE_WARN("glTF failed, returning builtin Cube for: {0}", path.c_str());
+        return GetMesh("Cube");
+    }
+    // Cache under path key
+    m_Meshes[path] = mesh;
+    return mesh;
 }
 
 std::shared_ptr<Material> AssetManager::GetMaterial(const std::string& name) {
