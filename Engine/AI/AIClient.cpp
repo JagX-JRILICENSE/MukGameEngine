@@ -2,6 +2,7 @@
 #include "Core/Log.h"
 
 #include <sstream>
+#include <vector>
 
 #ifdef MUK_PLATFORM_WINDOWS
 #include <Windows.h>
@@ -21,10 +22,40 @@ static std::string EscapeJson(const std::string& s) {
             case '\n': o += "\\n"; break;
             case '\r': o += "\\r"; break;
             case '\t': o += "\\t"; break;
-            default: o += c; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) continue;
+                o += c;
+                break;
         }
     }
     return o;
+}
+
+static std::string ExtractJsonStringField(const std::string& json, const char* field) {
+    std::string key = std::string("\"") + field + "\"";
+    auto pos = json.find(key);
+    if (pos == std::string::npos) return {};
+    pos = json.find(':', pos);
+    if (pos == std::string::npos) return {};
+    pos = json.find('"', pos);
+    if (pos == std::string::npos) return {};
+    size_t start = pos + 1;
+    std::string out;
+    for (size_t i = start; i < json.size(); ++i) {
+        if (json[i] == '\\' && i + 1 < json.size()) {
+            char n = json[i + 1];
+            if (n == 'n') out += '\n';
+            else if (n == '"') out += '"';
+            else if (n == '\\') out += '\\';
+            else if (n == 't') out += '\t';
+            else out += n;
+            ++i;
+            continue;
+        }
+        if (json[i] == '"') break;
+        out += json[i];
+    }
+    return out;
 }
 
 std::string AIClient::BuildRequestBody(const std::vector<AIMessage>& messages, float temperature) const {
@@ -32,6 +63,7 @@ std::string AIClient::BuildRequestBody(const std::vector<AIMessage>& messages, f
     oss << "{"
         << "\"model\":\"" << EscapeJson(m_Settings.ActiveModel()) << "\","
         << "\"temperature\":" << temperature << ","
+        << "\"max_tokens\":1024,"
         << "\"messages\":[";
     for (size_t i = 0; i < messages.size(); ++i) {
         if (i) oss << ",";
@@ -45,7 +77,6 @@ std::string AIClient::BuildRequestBody(const std::vector<AIMessage>& messages, f
 AIResponse AIClient::HttpPostJson(const std::string& url, const std::string& apiKey, const std::string& body) {
     AIResponse result;
 #ifdef MUK_PLATFORM_WINDOWS
-    // Parse URL
     std::wstring wurl(url.begin(), url.end());
     URL_COMPONENTS uc = {};
     uc.dwStructSize = sizeof(uc);
@@ -56,13 +87,16 @@ AIResponse AIClient::HttpPostJson(const std::string& url, const std::string& api
     uc.lpszUrlPath = path;
     uc.dwUrlPathLength = 2048;
     if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &uc)) {
-        result.Error = "Invalid URL";
+        result.Error = "Invalid URL: " + url;
         return result;
     }
 
-    HINTERNET hSession = WinHttpOpen(L"MukGameEngine/0.4",
+    HINTERNET hSession = WinHttpOpen(L"MukGameEngine/0.6",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) { result.Error = "WinHttpOpen failed"; return result; }
+
+    // Timeouts: resolve/connect/send/receive (ms)
+    WinHttpSetTimeouts(hSession, 15000, 15000, 30000, 60000);
 
     HINTERNET hConnect = WinHttpConnect(hSession, host, uc.nPort, 0);
     if (!hConnect) {
@@ -81,26 +115,36 @@ AIResponse AIClient::HttpPostJson(const std::string& url, const std::string& api
         return result;
     }
 
-    std::wstring headers = L"Content-Type: application/json\r\nAuthorization: Bearer ";
+    std::wstring headers = L"Content-Type: application/json\r\n";
+    headers += L"Authorization: Bearer ";
     headers += std::wstring(apiKey.begin(), apiKey.end());
     headers += L"\r\n";
+    // OpenRouter recommends these optional headers
+    headers += L"HTTP-Referer: https://github.com/JagX-JRILICENSE/MukGameEngine\r\n";
+    headers += L"X-Title: Muk Game Engine\r\n";
 
-    BOOL ok = WinHttpSendRequest(hRequest, headers.c_str(), (DWORD)headers.size(),
+    BOOL ok = WinHttpSendRequest(hRequest, headers.c_str(), (DWORD)-1,
         (LPVOID)body.data(), (DWORD)body.size(), (DWORD)body.size(), 0);
     if (!ok || !WinHttpReceiveResponse(hRequest, nullptr)) {
-        result.Error = "HTTP request failed";
+        result.Error = "HTTP request failed (network / TLS)";
         WinHttpCloseHandle(hRequest);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
         return result;
     }
 
+    DWORD status = 0;
+    DWORD statusSize = sizeof(status);
+    WinHttpQueryHeaders(hRequest,
+        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+        WINHTTP_HEADER_NAME_BY_INDEX, &status, &statusSize, WINHTTP_NO_HEADER_INDEX);
+
     std::string response;
     DWORD available = 0;
     while (WinHttpQueryDataAvailable(hRequest, &available) && available > 0) {
-        std::vector<char> buf(available + 1);
+        std::vector<char> buf(available);
         DWORD read = 0;
-        WinHttpReadData(hRequest, buf.data(), available, &read);
+        if (!WinHttpReadData(hRequest, buf.data(), available, &read) || read == 0) break;
         response.append(buf.data(), read);
     }
 
@@ -110,43 +154,52 @@ AIResponse AIClient::HttpPostJson(const std::string& url, const std::string& api
 
     result.RawJson = response;
 
-    // Very small JSON extract of choices[0].message.content
-    auto pos = response.find("\"content\"");
-    if (pos != std::string::npos) {
-        pos = response.find(':', pos);
-        if (pos != std::string::npos) {
-            pos = response.find('"', pos);
-            if (pos != std::string::npos) {
-                size_t start = pos + 1;
-                std::string content;
-                for (size_t i = start; i < response.size(); ++i) {
-                    if (response[i] == '\\' && i + 1 < response.size()) {
-                        char n = response[i + 1];
-                        if (n == 'n') content += '\n';
-                        else if (n == '"') content += '"';
-                        else if (n == '\\') content += '\\';
-                        else content += n;
-                        ++i;
-                        continue;
-                    }
-                    if (response[i] == '"') break;
-                    content += response[i];
-                }
-                result.Content = content;
-                result.Success = true;
-                return result;
-            }
-        }
+    if (status == 401 || status == 403) {
+        result.Error = "Auth failed (HTTP " + std::to_string(status) + ") — check API key";
+        auto msg = ExtractJsonStringField(response, "message");
+        if (msg.empty()) msg = ExtractJsonStringField(response, "error");
+        if (!msg.empty()) result.Error += ": " + msg;
+        return result;
+    }
+    if (status == 429) {
+        result.Error = "Rate limited (HTTP 429) — free tiers are limited; wait and retry";
+        return result;
+    }
+    if (status >= 400) {
+        auto msg = ExtractJsonStringField(response, "message");
+        if (msg.empty()) msg = ExtractJsonStringField(response, "error");
+        result.Error = "HTTP " + std::to_string(status);
+        if (!msg.empty()) result.Error += ": " + msg;
+        else if (response.size() < 400) result.Error += ": " + response;
+        else result.Error += " — check model id / key";
+        return result;
     }
 
+    // Prefer choices[0].message.content
+    auto choices = response.find("\"choices\"");
+    std::string content;
+    if (choices != std::string::npos) {
+        auto msg = response.find("\"message\"", choices);
+        if (msg != std::string::npos)
+            content = ExtractJsonStringField(response.substr(msg), "content");
+    }
+    if (content.empty())
+        content = ExtractJsonStringField(response, "content");
+
+    if (!content.empty()) {
+        result.Content = content;
+        result.Success = true;
+        return result;
+    }
+
+    result.Error = "Could not parse assistant content";
     if (response.find("\"error\"") != std::string::npos) {
-        result.Error = "Provider error — check key/model (see raw JSON)";
-    } else {
-        result.Error = "Could not parse assistant content";
+        auto msg = ExtractJsonStringField(response, "message");
+        if (!msg.empty()) result.Error = msg;
     }
 #else
     (void)url; (void)apiKey; (void)body;
-    result.Error = "AI client only implemented on Windows (WinHTTP)";
+    result.Error = "AI client only on Windows (WinHTTP)";
 #endif
     return result;
 }
@@ -154,14 +207,25 @@ AIResponse AIClient::HttpPostJson(const std::string& url, const std::string& api
 AIResponse AIClient::Chat(const std::vector<AIMessage>& messages, float temperature) {
     if (!m_Settings.HasAnyKey()) {
         AIResponse r;
-        r.Error = "No API key set. Add your key in settings.ini (OpenRouter / NVIDIA / OpenAI / custom).";
+        r.Error = "No API key. OpenRouter: openrouter.ai/keys | NVIDIA: build.nvidia.com → Get API Key";
+        return r;
+    }
+    if (m_Settings.ActiveModel().empty()) {
+        AIResponse r;
+        r.Error = "No model selected — pick a FREE model in the AI panel";
         return r;
     }
 
     std::string base = m_Settings.ActiveBaseUrl();
-    if (!base.empty() && base.back() == '/') base.pop_back();
+    if (base.empty()) {
+        AIResponse r;
+        r.Error = "Base URL empty";
+        return r;
+    }
+    if (base.back() == '/') base.pop_back();
     std::string url = base + "/chat/completions";
     std::string body = BuildRequestBody(messages, temperature);
+    MUK_CORE_INFO("AI request {0} model={1}", url.c_str(), m_Settings.ActiveModel().c_str());
     return HttpPostJson(url, m_Settings.ActiveApiKey(), body);
 }
 
@@ -169,12 +233,10 @@ AIResponse AIClient::AskEngineControl(const std::string& userPrompt) {
     std::vector<AIMessage> msgs;
     msgs.push_back({
         "system",
-        "You are Muk Engine AI Assistant. Help the user control and design a C++/DX12 game engine "
-        "similar in ambition to Unreal. Reply with clear steps, code sketches, or editor actions. "
-        "If the user asks to change scene parameters, respond with a short ACTION block like:\n"
+        "You are Muk Engine AI Assistant for a C++/DX12 game engine. "
+        "Be practical and concise. When changing the scene, emit ACTION lines:\n"
         "ACTION: set_camera eye=0,2,-5 target=0,0,0\n"
         "ACTION: spawn_cube x=1 y=0 z=0\n"
-        "Keep answers practical and concise."
     });
     msgs.push_back({ "user", userPrompt });
     return Chat(msgs);
