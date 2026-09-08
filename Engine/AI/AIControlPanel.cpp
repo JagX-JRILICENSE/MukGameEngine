@@ -1,6 +1,8 @@
 #include "AIControlPanel.h"
 #include "Renderer/Renderer.h"
 #include "Core/Log.h"
+#include "Core/Application.h"
+#include "ECS/Component.h"
 #include <cstring>
 #include <sstream>
 
@@ -13,17 +15,16 @@ namespace Muk {
 void AIControlPanel::Initialize() {
     m_Settings.Load();
     m_Client.SetSettings(m_Settings);
-    m_Log.push_back("AI Control ready. Bring your own OpenRouter / NVIDIA / OpenAI / custom key.");
-    m_Log.push_back("Settings file: " + UserSettings::SettingsPath());
+    m_Log.push_back("AI Control ready (BYOK). Try: 'move camera closer' or ask for ACTION: spawn_cube");
+    m_Log.push_back("Settings: " + UserSettings::SettingsPath());
 }
 
 void AIControlPanel::ApplySimpleActions(Renderer& renderer, const std::string& reply) {
-    // Parse lines like: ACTION: set_camera eye=0,2,-5 target=0,0,0
     std::istringstream iss(reply);
     std::string line;
     while (std::getline(iss, line)) {
         if (line.find("ACTION: set_camera") != std::string::npos) {
-            CameraView cam = {};
+            CameraView cam = renderer.GetCamera();
             auto parseVec = [](const std::string& s, const char* key, Vec3& out) {
                 auto p = s.find(key);
                 if (p == std::string::npos) return;
@@ -37,6 +38,25 @@ void AIControlPanel::ApplySimpleActions(Renderer& renderer, const std::string& r
             parseVec(line, "target", cam.Target);
             renderer.SetCamera(cam);
             m_Log.push_back("[Applied] set_camera");
+        }
+        if (line.find("ACTION: spawn_cube") != std::string::npos) {
+            float x=0,y=0.5f,z=0;
+            auto p = line.find("x=");
+            if (p != std::string::npos) sscanf(line.c_str() + p, "x=%f", &x);
+            p = line.find("y=");
+            if (p != std::string::npos) sscanf(line.c_str() + p, "y=%f", &y);
+            p = line.find("z=");
+            if (p != std::string::npos) sscanf(line.c_str() + p, "z=%f", &z);
+
+            auto& world = Application::Get().GetWorld();
+            auto e = world.CreateEntity();
+            world.AddComponent<NameComponent>(e).Name = "AI_Cube";
+            auto& t = world.AddComponent<Transform>(e);
+            t.Position = {x, y, z};
+            auto& mr = world.AddComponent<MeshRenderer>(e);
+            mr.MeshName = "Cube";
+            mr.MaterialName = "Default";
+            m_Log.push_back("[Applied] spawn_cube at " + std::to_string(x) + "," + std::to_string(y) + "," + std::to_string(z));
         }
     }
 }
@@ -57,42 +77,35 @@ void AIControlPanel::Draw(Renderer& renderer) {
     }
 
     ImGui::Separator();
-    ImGui::Text("API key (stored only on this PC)");
+    ImGui::Text("API key (this PC only)");
     std::string active = m_Settings.ActiveApiKey();
     if (active.size() > 8)
         ImGui::TextDisabled("Key set: %s...%s", active.substr(0, 4).c_str(), active.substr(active.size() - 4).c_str());
     else if (!active.empty())
-        ImGui::TextDisabled("Key set (short)");
+        ImGui::TextDisabled("Key set");
     else
-        ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "No key — paste below and Save");
+        ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "No key — paste + Save");
 
     ImGui::InputText("##key", m_KeyEdit, sizeof(m_KeyEdit), ImGuiInputTextFlags_Password);
-    if (ImGui::Button("Apply key to provider")) {
+    if (ImGui::Button("Apply key")) {
         if (m_Settings.Provider == "nvidia") m_Settings.NvidiaApiKey = m_KeyEdit;
         else if (m_Settings.Provider == "openai") m_Settings.OpenAIApiKey = m_KeyEdit;
         else if (m_Settings.Provider == "custom") m_Settings.CustomApiKey = m_KeyEdit;
         else m_Settings.OpenRouterApiKey = m_KeyEdit;
         m_Client.SetSettings(m_Settings);
-        m_Log.push_back("Key applied in memory — click Save settings to persist.");
+        m_Log.push_back("Key applied in memory");
     }
     ImGui::SameLine();
-    if (ImGui::Button("Save settings")) {
-        if (m_Settings.Save())
-            m_Log.push_back("Saved to " + UserSettings::SettingsPath());
-        else
-            m_Log.push_back("Save failed");
+    if (ImGui::Button("Save")) {
+        m_Log.push_back(m_Settings.Save() ? "Saved settings" : "Save failed");
     }
     ImGui::SameLine();
     if (ImGui::Button("Reload")) {
         m_Settings.Load();
         m_Client.SetSettings(m_Settings);
-        m_Log.push_back("Reloaded settings");
     }
 
-    ImGui::Separator();
     ImGui::Text("Model: %s", m_Settings.ActiveModel().c_str());
-    ImGui::TextWrapped("Ask the model to help design levels, write systems, or emit ACTION lines to tweak the camera.");
-
     ImGui::InputTextMultiline("##prompt", m_Input, sizeof(m_Input), ImVec2(-1, 80));
     if (ImGui::Button("Send") && !m_Busy && std::strlen(m_Input) > 0) {
         m_Busy = true;
@@ -112,10 +125,7 @@ void AIControlPanel::Draw(Renderer& renderer) {
     ImGui::BeginChild("ailog", ImVec2(0, 0), true);
     for (const auto& line : m_Log)
         ImGui::TextWrapped("%s", line.c_str());
-    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
-        ImGui::SetScrollHereY(1.0f);
     ImGui::EndChild();
-
     ImGui::End();
 #else
     (void)renderer;
