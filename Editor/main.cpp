@@ -1,6 +1,8 @@
 #include "Engine.h"
 #include "EditorUI/EditorUI.h"
 #include "EditorUI/ViewportGizmo.h"
+#include "Editor/UndoStack.h"
+#include "Editor/PlayInEditor.h"
 #include "AI/AIControlPanel.h"
 #include "Physics/CharacterController.h"
 #include "Core/Profiler.h"
@@ -46,16 +48,13 @@ protected:
             t.Scale = {12, 0.2f, 12};
             auto& mr = ECS().AddComponent<MeshRenderer>(e);
             mr.MeshName = "Cube";
-            mr.MaterialName = "Default";
             Track(e, "Floor");
-
             RigidBodyDesc rb;
             rb.Type = BodyType::Static;
             rb.Shape = ShapeType::Box;
             rb.Position = t.Position;
             rb.HalfExtents = {6, 0.1f, 6};
-            auto bodyId = Physics().CreateBody(rb);
-            ECS().AddComponent<RigidBodyComponent>(e).BodyId = bodyId;
+            ECS().AddComponent<RigidBodyComponent>(e).BodyId = Physics().CreateBody(rb);
         }
 
         {
@@ -63,9 +62,7 @@ protected:
             ECS().AddComponent<NameComponent>(e).Name = "Cube";
             auto& t = ECS().AddComponent<Transform>(e);
             t.Position = {1.5f, 0.5f, 0};
-            auto& mr = ECS().AddComponent<MeshRenderer>(e);
-            mr.MeshName = "Cube";
-            mr.MaterialName = "Default";
+            ECS().AddComponent<MeshRenderer>(e).MeshName = "Cube";
             Track(e, "Cube");
             m_Selected = e;
         }
@@ -84,18 +81,13 @@ protected:
         {
             CharacterDesc cd;
             cd.Position = {0, 1.0f, 2};
-            cd.Radius = 0.3f;
-            cd.Height = 1.0f;
             m_Character.Create(Physics(), cd);
-
             auto e = ECS().CreateEntity();
             ECS().AddComponent<NameComponent>(e).Name = "Player";
             auto& t = ECS().AddComponent<Transform>(e);
             t.Position = cd.Position;
             t.Scale = {0.5f, 1.0f, 0.5f};
-            auto& mr = ECS().AddComponent<MeshRenderer>(e);
-            mr.MeshName = "Cube";
-            mr.MaterialName = "Default";
+            ECS().AddComponent<MeshRenderer>(e).MeshName = "Cube";
             Track(e, "Player");
             m_PlayerEntity = e;
         }
@@ -118,30 +110,51 @@ protected:
         checker->Name = "Checker";
         Renderer().UploadTexture("Checker", *checker);
         m_CheckerMat = Material::CreateDefault();
-        m_CheckerMat.Name = "CheckerMat";
         m_CheckerMat.AlbedoMap = checker;
         m_CheckerMat.AlbedoTexture = "Checker";
 
-        m_UI.Log(Physics().IsUsingJolt()
-            ? "Jolt CharacterVirtual + shadows + ImGuizmo ready"
-            : "Simple character + shadows + ImGuizmo (build -DMUK_USE_JOLT=ON for Jolt)");
+        m_UI.Log("v0.6: soft PCF cascades + Undo (Ctrl+Z) + Play-In-Editor");
     }
 
     void OnUpdate(float dt) override {
+#ifdef MUK_PLATFORM_WINDOWS
+        // Global hotkeys
+        static bool zWas = false, yWas = false, pWas = false;
+        bool zDown = (GetAsyncKeyState('Z') & 0x8000) != 0;
+        bool yDown = (GetAsyncKeyState('Y') & 0x8000) != 0;
+        bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+        bool pDown = (GetAsyncKeyState(VK_F5) & 0x8000) != 0;
+
+        if (ctrl && zDown && !zWas && !m_PIE.IsPlaying())
+            m_Undo.Undo(ECS());
+        if (ctrl && yDown && !yWas && !m_PIE.IsPlaying())
+            m_Undo.Redo(ECS());
+        if (pDown && !pWas)
+            m_PIE.Toggle(ECS(), &m_Character);
+        zWas = zDown; yWas = yDown; pWas = pDown;
+#endif
+
+        // Character only moves while playing (or always for demo — use PIE gate)
+        if (!m_PIE.IsPlaying()) {
+            // Still allow WASD in edit mode for testing character, optional:
+            // return; // uncomment to lock character to Play mode only
+        }
+
         Vec3 wish{0, 0, 0};
 #ifdef MUK_PLATFORM_WINDOWS
         if (GetAsyncKeyState('W') & 0x8000) wish.z += 1;
         if (GetAsyncKeyState('S') & 0x8000) wish.z -= 1;
         if (GetAsyncKeyState('A') & 0x8000) wish.x -= 1;
         if (GetAsyncKeyState('D') & 0x8000) wish.x += 1;
-        if (GetAsyncKeyState(VK_SPACE) & 0x8000) m_Character.Jump(6.0f);
+        if ((GetAsyncKeyState(VK_SPACE) & 0x8000) && m_PIE.IsPlaying())
+            m_Character.Jump(6.0f);
 #endif
-        m_Character.SetMoveInput(wish, 5.0f);
-        m_Character.Update(Physics(), dt);
-
-        if (m_PlayerEntity.IsValid()) {
-            if (auto* t = ECS().GetComponent<Transform>(m_PlayerEntity))
-                t->Position = m_Character.GetPosition();
+        if (m_PIE.IsPlaying() || true) {
+            m_Character.SetMoveInput(wish, 5.0f);
+            m_Character.Update(Physics(), dt);
+            if (m_PlayerEntity.IsValid())
+                if (auto* t = ECS().GetComponent<Transform>(m_PlayerEntity))
+                    t->Position = m_Character.GetPosition();
         }
     }
 
@@ -149,6 +162,7 @@ protected:
         m_Gizmo.BeginFrame();
         m_UI.BeginFrame();
         m_UI.DrawDockspace();
+        DrawToolbar();
         m_UI.DrawHierarchy(m_Entities, m_Selected);
         DrawDetails();
         m_UI.DrawContentBrowser();
@@ -167,9 +181,9 @@ protected:
             });
         };
 
-        Renderer().BeginShadowPass({0, 0, 0}, 18.0f);
-        drawScene();
-        Renderer().EndShadowPass();
+        // All 3 cascades + soft PCF sampling
+        Renderer().BeginShadowPass({0, 0, 0}, 40.0f);
+        Renderer().RenderAllShadowCascades(drawScene);
 
         u32 vw = m_UI.GetDesiredViewportWidth();
         u32 vh = m_UI.GetDesiredViewportHeight();
@@ -180,7 +194,9 @@ protected:
 
         m_UI.DrawViewport(Renderer(), Renderer().GetSceneRTGpuHandle(),
                           Renderer().GetSceneRTWidth(), Renderer().GetSceneRTHeight());
-        DrawViewportGizmo();
+
+        if (!m_PIE.IsPlaying())
+            DrawViewportGizmo();
 
         m_UI.RenderDrawData();
         m_UI.EndFrame();
@@ -200,18 +216,45 @@ private:
         m_UI.Log("Created: " + name);
     }
 
+    void DrawToolbar() {
+#ifdef MUK_USE_IMGUI
+        ImGui::Begin("Toolbar");
+        if (m_PIE.IsPlaying()) {
+            if (ImGui::Button("Stop (F5)"))
+                m_PIE.Stop(ECS(), &m_Character);
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.2f, 1, 0.3f, 1), "PLAYING");
+        } else {
+            if (ImGui::Button("Play (F5)"))
+                m_PIE.Play(ECS(), &m_Character);
+            ImGui::SameLine();
+            ImGui::TextDisabled("Edit mode");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Undo") && m_Undo.CanUndo()) m_Undo.Undo(ECS());
+        ImGui::SameLine();
+        if (ImGui::Button("Redo") && m_Undo.CanRedo()) m_Undo.Redo(ECS());
+        ImGui::Text("Ctrl+Z / Ctrl+Y · Soft PCF + 3 cascades");
+        ImGui::End();
+#endif
+    }
+
     void DrawDetails() {
 #ifdef MUK_USE_IMGUI
         ImGui::Begin("Details");
-        if (m_Selected.IsValid()) {
+        if (m_Selected.IsValid() && !m_PIE.IsPlaying()) {
             ImGui::Text("Entity %u", m_Selected.GetID());
             if (auto* t = ECS().GetComponent<Transform>(m_Selected)) {
-                ImGui::DragFloat3("Position", &t->Position.x, 0.05f);
-                ImGui::DragFloat3("Rotation", &t->Rotation.x, 0.5f);
-                ImGui::DragFloat3("Scale", &t->Scale.x, 0.05f);
+                Transform before = *t;
+                bool ch = false;
+                ch |= ImGui::DragFloat3("Position", &t->Position.x, 0.05f);
+                ch |= ImGui::DragFloat3("Rotation", &t->Rotation.x, 0.5f);
+                ch |= ImGui::DragFloat3("Scale", &t->Scale.x, 0.05f);
+                if (ImGui::IsItemDeactivatedAfterEdit() || (ch && ImGui::IsMouseReleased(0))) {
+                    m_Undo.BeginTransformEdit(m_Selected, before);
+                    m_Undo.EndTransformEdit(m_Selected, *t, ECS());
+                }
             }
-            ImGui::Separator();
-            ImGui::Text("Gizmo: T translate | R rotate | Y scale");
             if (ImGui::RadioButton("Translate", m_Gizmo.GetOperation() == GizmoOp::Translate))
                 m_Gizmo.SetOperation(GizmoOp::Translate);
             ImGui::SameLine();
@@ -220,11 +263,13 @@ private:
             ImGui::SameLine();
             if (ImGui::RadioButton("Scale", m_Gizmo.GetOperation() == GizmoOp::Scale))
                 m_Gizmo.SetOperation(GizmoOp::Scale);
+        } else if (m_PIE.IsPlaying()) {
+            ImGui::TextDisabled("Details locked during Play");
         }
         ImGui::Separator();
-        ImGui::Text("Player grounded: %s", m_Character.IsGrounded() ? "yes" : "no");
+        ImGui::Text("Grounded: %s", m_Character.IsGrounded() ? "yes" : "no");
         ImGui::Text("Physics: %s", Physics().IsUsingJolt() ? "Jolt" : "Simple");
-        ImGui::Text("Shadows: %s", Renderer().ShadowsEnabled() ? "on" : "off");
+        ImGui::Text("Shadows: cascades + soft PCF");
         ImGui::End();
 #else
         m_UI.DrawDetails(ECS(), m_Selected);
@@ -241,16 +286,22 @@ private:
         ImVec2 pos = ImGui::GetWindowPos();
         ImVec2 min = ImGui::GetWindowContentRegionMin();
         ImVec2 size = ImGui::GetContentRegionAvail();
-        float x = pos.x + min.x;
-        float y = pos.y + min.y;
 
         if (ImGui::IsKeyPressed(ImGuiKey_T)) m_Gizmo.SetOperation(GizmoOp::Translate);
         if (ImGui::IsKeyPressed(ImGuiKey_R)) m_Gizmo.SetOperation(GizmoOp::Rotate);
         if (ImGui::IsKeyPressed(ImGuiKey_Y)) m_Gizmo.SetOperation(GizmoOp::Scale);
 
+        Transform before = *t;
+        bool wasUsing = m_Gizmo.IsUsing();
         Mat4 view = Renderer().GetViewMatrix();
         Mat4 proj = Renderer().GetProjectionMatrix();
-        m_Gizmo.Draw(view.m, proj.m, x, y, size.x, size.y, *t);
+        m_Gizmo.Draw(view.m, proj.m, pos.x + min.x, pos.y + min.y, size.x, size.y, *t);
+
+        if (!wasUsing && m_Gizmo.IsUsing())
+            m_Undo.BeginTransformEdit(m_Selected, before);
+        if (wasUsing && !m_Gizmo.IsUsing())
+            m_Undo.EndTransformEdit(m_Selected, *t, ECS());
+
         ImGui::End();
 #endif
     }
@@ -261,6 +312,7 @@ private:
         auto& p = Profiler::Get();
         ImGui::Text("FPS: %.1f", p.Fps());
         ImGui::Text("Frame: %.2f ms", p.LastFrameMs());
+        ImGui::Text("PIE: %s", m_PIE.IsPlaying() ? "Play" : "Edit");
         for (auto& [name, ms] : p.LastScopes())
             ImGui::Text("%s: %.2f ms", name.c_str(), ms);
         ImGui::End();
@@ -270,6 +322,8 @@ private:
     EditorUI m_UI;
     AIControlPanel m_AI;
     ViewportGizmo m_Gizmo;
+    UndoStack m_Undo;
+    PlayInEditor m_PIE;
     CharacterController m_Character;
     std::vector<EditorEntityInfo> m_Entities;
     Entity m_Selected;
