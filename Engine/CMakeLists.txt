@@ -20,6 +20,7 @@ set(ENGINE_SOURCES
     Physics/CharacterController.cpp
     Asset/AssetManager.cpp
     Asset/GltfLoader.cpp
+    Asset/ContentBrowser.cpp
     EditorUI/EditorUI.cpp
     EditorUI/ViewportGizmo.cpp
     Editor/UndoStack.cpp
@@ -27,7 +28,12 @@ set(ENGINE_SOURCES
     AI/UserSettings.cpp
     AI/AIClient.cpp
     AI/AIControlPanel.cpp
+    AI/AIGameAgent.cpp
     Scene/SceneRenderer.cpp
+    Scene/SceneSerializer.cpp
+    Animation/Skeleton.cpp
+    Audio/AudioSystem.cpp
+    Reflection/Reflection.cpp
 )
 
 set(ENGINE_HEADERS
@@ -52,11 +58,13 @@ set(ENGINE_HEADERS
     Renderer/Mesh.h
     Renderer/Material.h
     Renderer/Texture.h
+    Renderer/PostSettings.h
     Input/Input.h
     Physics/PhysicsWorld.h
     Physics/CharacterController.h
     Asset/AssetManager.h
     Asset/GltfLoader.h
+    Asset/ContentBrowser.h
     EditorUI/EditorUI.h
     EditorUI/ViewportGizmo.h
     Editor/UndoStack.h
@@ -64,7 +72,12 @@ set(ENGINE_HEADERS
     AI/UserSettings.h
     AI/AIClient.h
     AI/AIControlPanel.h
+    AI/AIGameAgent.h
     Scene/SceneRenderer.h
+    Scene/SceneSerializer.h
+    Animation/Skeleton.h
+    Audio/AudioSystem.h
+    Reflection/Reflection.h
     Engine.h
 )
 
@@ -73,7 +86,7 @@ add_library(MukEngine STATIC ${ENGINE_SOURCES} ${ENGINE_HEADERS})
 target_include_directories(MukEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
-    target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler winhttp shell32 ole32)
+    target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler winhttp shell32 ole32 xaudio2)
 endif()
 
 if(MUK_USE_IMGUI)
