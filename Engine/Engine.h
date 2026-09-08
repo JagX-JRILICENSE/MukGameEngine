@@ -18,3 +18,6 @@
 #include "Asset/AssetManager.h"
 #include "Asset/GltfLoader.h"
 #include "EditorUI/EditorUI.h"
+#include "AI/UserSettings.h"
+#include "AI/AIClient.h"
+#include "AI/AIControlPanel.h"
