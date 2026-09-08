@@ -1,38 +1,22 @@
 # Muk Roadmap
 
-**Strategy:** Good enough to ship small games, then better than Unreal *for some users* (MIT, lean, BYOK AI).
+## Done (v0.6)
 
----
+- Soft 3×3 PCF + 3-cascade shadow maps
+- Undo/Redo transform stack
+- Play-In-Editor (snapshot / restore)
+- Lit DX12, textures, SceneRT, ImGuizmo, Jolt character, BYOK AI, Windows CI
 
-## Phase A — Foundation
+## Next
 
-| Item | Status |
-|------|--------|
-| DX12 mesh + depth + textures | Done |
-| Editor viewport RTT | Done |
-| BYOK AI | Done |
-| Windows CI package | Done |
-| Lit shading | Done |
-| ECS scene draw | Done |
-| **Directional shadow map** | **Done** |
-| **Viewport ImGuizmo (T/R/S)** | **Done** |
-| **Jolt CharacterVirtual + WASD** | **Done** (fallback if no Jolt) |
-| Cascaded shadows / soft PCF | Next |
-| Undo stack | Next |
-| Play-in-editor | Next |
+1. Per-pixel cascade pick (multi LightVP in CB)
+2. Skinned animation
+3. Audio
+4. Content Browser + save/load
+5. PBR IBL + post stack
+6. Component reflection UI
+7. AI scene ops expansion
 
-## Phase B — Editor
+## Strategy
 
-- Content Browser, prefabs, reflection properties, PIE
-
-## Phase C — Production slice
-
-- Animation, audio, navmesh, save/load, installer
-
-## Phase D — High-end graphics
-
-- PBR IBL, post (TAA/bloom), LODs
-
-## Phase E — Moat
-
-- Deep AI scene ops, plugins, sample games
+Good enough for small games first → better than Unreal for lean/open/AI workflows, not feature-for-feature clone.
