@@ -1,19 +1,18 @@
 #include "Engine.h"
-#include <iostream>
 
 using namespace Muk;
 
 class SandboxApp : public Application {
 protected:
     void OnInit() override {
-        MUK_CORE_INFO("Sandbox application initialized");
+        MUK_CORE_INFO("Sandbox: uploading triangle mesh to GPU");
 
-        // Create a simple entity with transform
-        auto entity = ECS().CreateEntity();
-        auto& transform = ECS().AddComponent<Transform>(entity);
-        transform.Position = {0.0f, 2.0f, 0.0f};
+        auto mesh = Assets().GetMesh("Triangle");
+        if (mesh) {
+            Renderer().UploadMesh(*mesh);
+        }
 
-        // Spawn a dynamic physics body that will fall
+        // Physics demo body
         RigidBodyDesc desc;
         desc.Type = BodyType::Dynamic;
         desc.Shape = ShapeType::Box;
@@ -23,34 +22,31 @@ protected:
         desc.Restitution = 0.3f;
         m_PhysicsBody = Physics().CreateBody(desc);
 
-        MUK_CORE_INFO("Created test physics body that will fall under gravity");
+        MUK_CORE_INFO("Sandbox ready - you should see a colored triangle");
     }
 
     void OnUpdate(float deltaTime) override {
-        // Sync physics position back (demo)
-        if (m_PhysicsBody != 0) {
-            Vec3 pos = Physics().GetBodyPosition(m_PhysicsBody);
-            // In a real engine we would write this back to the Transform component
-            (void)pos;
-        }
+        m_Time += deltaTime;
+        (void)m_PhysicsBody;
     }
 
     void OnRender() override {
-        // Draw a triangle (GPU path still being completed)
         auto mesh = Assets().GetMesh("Triangle");
         auto material = Assets().GetMaterial("Default");
-        if (mesh && material) {
-            Mat4 transform = Mat4::Identity();
-            Renderer().DrawMesh(*mesh, transform, *material);
-        }
+        if (!mesh || !material) return;
+
+        // Simple orthographic-ish scale so triangle is visible in NDC
+        Mat4 transform = Mat4::Scale({0.8f, 0.8f, 0.8f});
+        Renderer().DrawMesh(*mesh, transform, *material);
     }
 
     void OnShutdown() override {
-        MUK_CORE_INFO("Sandbox application shutting down");
+        MUK_CORE_INFO("Sandbox shut down");
     }
 
 private:
     EntityID m_PhysicsBody = 0;
+    float m_Time = 0.0f;
 };
 
 int main() {
