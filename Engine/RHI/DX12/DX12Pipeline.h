@@ -9,6 +9,7 @@
 #include "Renderer/Mesh.h"
 #include "Renderer/Material.h"
 #include "Math/Matrix.h"
+#include "Math/Vector.h"
 #include "DX12Texture.h"
 
 namespace Muk {
@@ -25,9 +26,14 @@ struct GPUMeshBuffers {
 
 struct FrameCB {
     float MVP[16];
+    float World[16];
     float BaseColor[4];
-    float UseTexture; // 1 = sample albedo
-    float Pad[3];
+    float LightDir[4];      // xyz + intensity
+    float LightColor[4];    // rgb + ambient
+    float UseTexture;
+    float Metallic;
+    float Roughness;
+    float Pad;
 };
 
 class DX12Pipeline {
@@ -41,7 +47,8 @@ public:
     bool HasMesh(const std::string& name) const;
 
     void Bind(ID3D12GraphicsCommandList* cmdList);
-    void SetMaterialParams(const Mat4& mvp, const Material& material);
+    void SetDrawParams(const Mat4& mvp, const Mat4& world, const Material& material,
+                       const Vec3& lightDir, const Vec3& lightColor, f32 intensity, f32 ambient);
     void DrawMesh(ID3D12GraphicsCommandList* cmdList, const std::string& name);
 
     bool IsReady() const { return m_Ready; }
