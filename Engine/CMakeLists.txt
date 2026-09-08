@@ -12,13 +12,16 @@ set(ENGINE_SOURCES
     RHI/DX12/DX12Pipeline.cpp
     RHI/DX12/DX12Texture.cpp
     RHI/DX12/DX12SceneRT.cpp
+    RHI/DX12/DX12ShadowMap.cpp
     Renderer/Renderer.cpp
     Renderer/Mesh.cpp
     Input/Input.cpp
     Physics/PhysicsWorld.cpp
+    Physics/CharacterController.cpp
     Asset/AssetManager.cpp
     Asset/GltfLoader.cpp
     EditorUI/EditorUI.cpp
+    EditorUI/ViewportGizmo.cpp
     AI/UserSettings.cpp
     AI/AIClient.cpp
     AI/AIControlPanel.cpp
@@ -42,15 +45,18 @@ set(ENGINE_HEADERS
     RHI/DX12/DX12Pipeline.h
     RHI/DX12/DX12Texture.h
     RHI/DX12/DX12SceneRT.h
+    RHI/DX12/DX12ShadowMap.h
     Renderer/Renderer.h
     Renderer/Mesh.h
     Renderer/Material.h
     Renderer/Texture.h
     Input/Input.h
     Physics/PhysicsWorld.h
+    Physics/CharacterController.h
     Asset/AssetManager.h
     Asset/GltfLoader.h
     EditorUI/EditorUI.h
+    EditorUI/ViewportGizmo.h
     AI/UserSettings.h
     AI/AIClient.h
     AI/AIControlPanel.h
@@ -70,6 +76,7 @@ if(MUK_USE_IMGUI)
     target_include_directories(MukEngine PUBLIC
         ${imgui_SOURCE_DIR}
         ${imgui_SOURCE_DIR}/backends
+        ${imguizmo_SOURCE_DIR}
     )
     target_sources(MukEngine PRIVATE
         ${imgui_SOURCE_DIR}/imgui.cpp
@@ -79,6 +86,7 @@ if(MUK_USE_IMGUI)
         ${imgui_SOURCE_DIR}/imgui_demo.cpp
         ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
         ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp
+        ${imguizmo_SOURCE_DIR}/ImGuizmo.cpp
     )
 endif()
 
