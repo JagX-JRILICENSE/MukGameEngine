@@ -19,14 +19,22 @@ public:
     std::shared_ptr<Mesh> GetMesh(const std::string& name);
     std::shared_ptr<Mesh> CreateMesh(const std::string& name, Mesh mesh);
     std::shared_ptr<Mesh> LoadMeshFromGLTF(const std::string& path);
+    void RegisterMesh(const std::string& name, std::shared_ptr<Mesh> mesh) {
+        if (mesh) m_Meshes[name] = std::move(mesh);
+    }
 
-    // Full import: mesh + material + textures registered
     GltfImportResult LoadGltfFull(const std::string& path);
 
     std::shared_ptr<Material> GetMaterial(const std::string& name);
     std::shared_ptr<Material> CreateMaterial(const std::string& name, Material material);
+    void RegisterMaterial(const std::string& name, std::shared_ptr<Material> mat) {
+        if (mat) m_Materials[name] = std::move(mat);
+    }
 
     std::shared_ptr<Texture> GetTexture(const std::string& name);
+    void RegisterTexture(const std::string& name, std::shared_ptr<Texture> tex) {
+        if (tex) m_Textures[name] = std::move(tex);
+    }
 
     void RegisterBuiltinAssets();
 
