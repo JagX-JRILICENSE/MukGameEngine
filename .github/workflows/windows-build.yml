@@ -7,74 +7,156 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+
 jobs:
   build:
     name: Build Muk (Windows x64)
     runs-on: windows-latest
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup MSVC
+      - name: Setup MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
-      - name: Configure CMake (full features)
+      - name: Configure CMake (ImGui + tinygltf, no Jolt — stable)
+        shell: pwsh
         run: |
           cmake -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
             -DMUK_USE_IMGUI=ON `
             -DMUK_USE_TINYGLTF=ON `
-            -DMUK_USE_JOLT=ON `
-            -DMUK_BUILD_SAMPLES=OFF
+            -DMUK_USE_JOLT=OFF `
+            -DMUK_BUILD_SAMPLES=OFF `
+            -DMUK_BUILD_EDITOR=ON
 
       - name: Build Release
-        run: cmake --build build --config Release --parallel
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel 4 -- /m /v:minimal
+
+      - name: Locate binaries
+        id: bins
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "build/bin/Release",
+            "build/Release",
+            "build/bin",
+            "build/Editor/Release",
+            "build/Runtime/Release"
+          )
+          $foundEditor = $null
+          $foundRuntime = $null
+          foreach ($d in $candidates) {
+            if (Test-Path "$d/MukEditor.exe") { $foundEditor = (Resolve-Path "$d/MukEditor.exe").Path }
+            if (Test-Path "$d/MukRuntime.exe") { $foundRuntime = (Resolve-Path "$d/MukRuntime.exe").Path }
+          }
+          Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host $_.FullName }
+          if (-not $foundEditor) {
+            Write-Error "MukEditor.exe not found after build"
+            exit 1
+          }
+          Write-Host "EDITOR=$foundEditor"
+          Write-Host "RUNTIME=$foundRuntime"
+          "editor=$foundEditor" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($foundRuntime) {
+            "runtime=$foundRuntime" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
 
       - name: Stage install package
         shell: pwsh
         run: |
           $out = "MukGameEngine-Windows-x64"
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
           New-Item -ItemType Directory -Force -Path "$out/bin" | Out-Null
           New-Item -ItemType Directory -Force -Path "$out/config" | Out-Null
 
-          $bin = "build/bin/Release"
-          if (-not (Test-Path $bin)) { $bin = "build/bin" }
+          $editor = "${{ steps.bins.outputs.editor }}"
+          $runtime = "${{ steps.bins.outputs.runtime }}"
+          Copy-Item $editor "$out/bin/MukEditor.exe" -Force
+          if ($runtime) { Copy-Item $runtime "$out/bin/MukRuntime.exe" -Force }
 
-          Copy-Item "$bin/MukRuntime.exe" "$out/bin/" -ErrorAction SilentlyContinue
-          Copy-Item "$bin/MukEditor.exe" "$out/bin/" -ErrorAction SilentlyContinue
-          Get-ChildItem $bin -Filter "*.dll" -ErrorAction SilentlyContinue | Copy-Item -Destination "$out/bin/"
+          $editorDir = Split-Path $editor -Parent
+          Get-ChildItem $editorDir -Filter "*.dll" -ErrorAction SilentlyContinue |
+            Copy-Item -Destination "$out/bin/" -Force
 
           Copy-Item README.md "$out/" -ErrorAction SilentlyContinue
           Copy-Item LICENSE "$out/" -ErrorAction SilentlyContinue
           Copy-Item ROADMAP.md "$out/" -ErrorAction SilentlyContinue
+          if (Test-Path "config/settings.example.ini") {
+            Copy-Item "config/settings.example.ini" "$out/config/"
+          }
 
           @"
+          # Muk BYOK — free models (Sep 2026)
+          # Get keys:
+          #   OpenRouter: https://openrouter.ai/keys  (free models use :free suffix)
+          #   NVIDIA:     https://build.nvidia.com    (Get API Key on any model)
+
           provider=openrouter
+
           openrouter_api_key=
-          openrouter_model=openai/gpt-4o-mini
+          openrouter_model=nvidia/nemotron-3.5-lightning:free
+          openrouter_base_url=https://openrouter.ai/api/v1
+
           nvidia_api_key=
+          nvidia_model=meta/llama-3.1-8b-instruct
+          nvidia_base_url=https://integrate.api.nvidia.com/v1
+
           openai_api_key=
+          openai_model=gpt-4o-mini
+          openai_base_url=https://api.openai.com/v1
           "@ | Set-Content -Encoding utf8 "$out/config/settings.example.ini"
 
           @"
-          Muk Game Engine v0.5 — Windows
-          ================================
-          bin\MukEditor.exe  — shadows, ImGuizmo (T/R/Y), WASD character, AI BYOK
-          bin\MukRuntime.exe — runtime loop
+          Muk Game Engine — Windows x64
+          =============================
+          1. Run bin\MukEditor.exe
+          2. AI free models:
+             - OpenRouter: paste key from openrouter.ai → pick a :free model in AI panel
+             - NVIDIA: paste nvapi- key from build.nvidia.com → free endpoint models
+          3. Copy config\settings.example.ini to %APPDATA%\MukGameEngine\settings.ini
 
-          Character: WASD move, Space jump
-          Gizmo: select entity, T translate / R rotate / Y scale
-          Physics: Jolt when built with MUK_USE_JOLT=ON
+          F5 = Play-In-Editor | Ctrl+Z undo | WASD character | T/R/Y gizmo
           "@ | Set-Content -Encoding utf8 "$out/INSTALL.txt"
 
-      - name: Upload artifact
+          if (-not (Test-Path "$out/bin/MukEditor.exe")) {
+            Write-Error "Package missing MukEditor.exe"
+            exit 1
+          }
+          Write-Host "Package OK"
+          Get-ChildItem -Recurse $out | Select-Object FullName, Length
+
+      - name: Upload Windows app artifact
         uses: actions/upload-artifact@v4
         with:
           name: MukGameEngine-Windows-x64
           path: MukGameEngine-Windows-x64
-          if-no-files-found: warn
+          if-no-files-found: error
+          retention-days: 30
 
-      - name: List binaries
+  # Optional heavier build with Jolt (does not block the main artifact)
+  build-jolt:
+    name: Build with Jolt (optional)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Configure + build with Jolt
         shell: pwsh
-        run: Get-ChildItem -Recurse build/bin -ErrorAction SilentlyContinue | Select-Object FullName
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+            -DMUK_USE_IMGUI=ON -DMUK_USE_TINYGLTF=ON -DMUK_USE_JOLT=ON `
+            -DMUK_BUILD_SAMPLES=OFF
+          cmake --build build --config Release --parallel 4
