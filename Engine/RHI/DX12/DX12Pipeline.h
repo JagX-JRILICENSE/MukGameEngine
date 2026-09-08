@@ -24,17 +24,22 @@ struct GPUMeshBuffers {
     u32 IndexCount = 0;
 };
 
+// Must match HLSL cbuffer layout (16-byte aligned)
 struct FrameCB {
     float MVP[16];
     float World[16];
-    float LightVP[16];
+    float LightVP0[16];
+    float LightVP1[16];
+    float LightVP2[16];
     float BaseColor[4];
-    float LightDir[4];
-    float LightColor[4];
+    float LightDir[4];   // xyz dir, w intensity
+    float LightColor[4]; // rgb + ambient in w
+    float CascadeSplits[4]; // x,y,z used; w = camera near-ish
     float UseTexture;
     float Metallic;
     float Roughness;
-    float ReceiveShadows; // 1 = sample shadow map
+    float ReceiveShadows;
+    float CamPos[4]; // xyz + tonemap exposure in w
 };
 
 class DX12Pipeline {
@@ -50,6 +55,13 @@ public:
     void BindLit(ID3D12GraphicsCommandList* cmdList);
     void BindShadow(ID3D12GraphicsCommandList* cmdList);
 
+    void SetDrawParams(const Mat4& mvp, const Mat4& world,
+                       const Mat4 lightVP[3], const float splits[3],
+                       const Material& material,
+                       const Vec3& lightDir, const Vec3& lightColor, f32 intensity, f32 ambient,
+                       bool receiveShadows, const Vec3& camPos, f32 exposure);
+
+    // Compat: single lightVP fills cascade 0
     void SetDrawParams(const Mat4& mvp, const Mat4& world, const Mat4& lightVP,
                        const Material& material,
                        const Vec3& lightDir, const Vec3& lightColor, f32 intensity, f32 ambient,
