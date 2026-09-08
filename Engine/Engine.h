@@ -2,7 +2,6 @@
 
 /**
  * Muk Game Engine - Main public header
- * Include this for the full engine API.
  */
 
 #include "Core/Core.h"
@@ -20,3 +19,5 @@
 #include "Input/Input.h"
 #include "Physics/PhysicsWorld.h"
 #include "Asset/AssetManager.h"
+#include "Asset/GltfLoader.h"
+#include "EditorUI/EditorUI.h"
