@@ -22,6 +22,8 @@ set(ENGINE_SOURCES
     Asset/GltfLoader.cpp
     EditorUI/EditorUI.cpp
     EditorUI/ViewportGizmo.cpp
+    Editor/UndoStack.cpp
+    Editor/PlayInEditor.cpp
     AI/UserSettings.cpp
     AI/AIClient.cpp
     AI/AIControlPanel.cpp
@@ -57,6 +59,8 @@ set(ENGINE_HEADERS
     Asset/GltfLoader.h
     EditorUI/EditorUI.h
     EditorUI/ViewportGizmo.h
+    Editor/UndoStack.h
+    Editor/PlayInEditor.h
     AI/UserSettings.h
     AI/AIClient.h
     AI/AIControlPanel.h
