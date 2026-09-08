@@ -1,127 +1,62 @@
 # Muk Game Engine
 
-**Muk Game Engine** is a next-generation, high-performance game engine designed to rival Unreal Engine, Unity, Godot, and other industry leaders. Built from the ground up with modern C++20, it aims for maximum performance, developer productivity, and visual fidelity on Windows (with cross-platform expansion planned).
+**Muk Game Engine** — modern C++20 game engine targeting Unreal-class features, starting on Windows / DirectX 12.
 
-> 🚀 **Status**: Foundation + Core Systems in active development. DX12 path is live.
+> **Status**: v0.2 — DX12 triangle path complete, Editor docking UI, Jolt-ready physics, glTF loader.
 
-## Vision
+**Repo**: https://github.com/JagX-JRILICENSE/MukGameEngine
 
-Muk aims to deliver:
+---
 
-- **Unreal-level rendering**: Deferred + Forward+, Nanite-inspired virtualized geometry, Lumen-style global illumination, ray tracing support
-- **Powerful Editor**: Full visual editor with viewport, outliner, details panel, content browser, Blueprint-like visual scripting
-- **ECS-first architecture**: High-performance Entity Component System
-- **Physics**: Jolt-ready rigid body system (simple solver now, full Jolt later)
-- **Animation**: Skeletal animation, IK, state machines, blend spaces
-- **Audio**: Spatial 3D audio, occlusion, reverb zones
-- **Networking**: Client-server, replication, prediction
-- **Scripting**: C++ + Lua / AngelScript / Visual Scripting
-- **Tools**: Asset pipeline, material editor, particle editor, sequencer
-- **Platform**: Primary target Windows (DirectX 12), later Linux, macOS, consoles
+## What's New in v0.2
 
-## What Works Right Now
+### 1. Complete DX12 Triangle Path
+- Root signature (CBV for MVP)
+- Graphics PSO + input layout (POSITION, NORMAL, TEXCOORD, COLOR)
+- HLSL vertex + pixel shaders (embedded + `Engine/Renderer/Shaders/Basic.hlsl`)
+- Runtime compile via `D3DCompile`
+- Vertex / index buffer upload
+- `Renderer::UploadMesh` + `DrawMesh` → real `DrawIndexedInstanced`
 
-### Step 1 – Real DirectX 12 RHI
-- Device creation (hardware + WARP fallback)
-- Command queue, allocators, graphics command list
-- Flip-model swapchain
-- RTV heap + double buffering
-- Frame synchronization with fences
-- Clear color + viewport/scissor
-- Resize support
+### 2. Dear ImGui Docking Editor Panels
+- `EditorUI` with dockspace host
+- Panels: **Hierarchy**, **Details**, **Viewport**, **Content Browser**, **Console**
+- Menu bar (File / Edit / Window)
+- Transform inspector (drag floats) when ImGui is enabled
+- Console fallback when built without ImGui
 
-### Step 2 – Forward Renderer + Meshes
-- `Mesh` class with Vertex format (Position, Normal, TexCoord, Color)
-- Built-in primitives: **Triangle**, **Cube**, **Quad**
-- `Renderer::DrawMesh()` submission API (GPU path next)
-- Dark clear color so you can see the window is alive
-
-### Step 3 – Physics
-- `PhysicsWorld` with create/destroy body API
-- Body types: Static / Dynamic / Kinematic
-- Shapes: Box, Sphere, Capsule
-- Gravity + simple Euler integration + ground plane collision
-- Designed so **Jolt Physics** can replace the solver with minimal API changes
-- `RigidBodyComponent` for ECS linking
-
-### Step 4 – Editor Foundation
-- `MukEditor` executable
-- Hierarchy seed entities (Camera, Light, Floor, Player Start)
-- Viewport / Details / Content Browser layout planned (ImGui next)
-- Physics test body spawned on editor start
-
-### Step 5 – Assets & Materials
-- `AssetManager` with builtin meshes & materials
-- PBR-ready `Material` (BaseColor, Metallic, Roughness, Emissive + texture slots)
-- `LoadMeshFromGLTF()` interface ready for tinygltf / cgltf
-
-## Architecture
-
-```
-MukGameEngine/
-├── Engine/
-│   ├── Core/           Application, Window (Win32), Log
-│   ├── Math/           Vec2/3/4, Mat4
-│   ├── RHI/            Abstraction + DX12 backend
-│   ├── Renderer/       Mesh, Material, Renderer
-│   ├── ECS/            Entity, World, Components
-│   ├── Physics/        PhysicsWorld (Jolt-ready)
-│   ├── Asset/          AssetManager
-│   └── Input/
-├── Editor/             Muk Editor
-├── Runtime/            Game / Sandbox executable
-├── Samples/
-└── CMakeLists.txt
+Enable:
+```bash
+cmake .. -DMUK_USE_IMGUI=ON
 ```
 
-## Features Roadmap
+### 3. Real Jolt Physics Integration Path
+- `PhysicsWorld` dual backend:
+  - **Default**: simple CPU solver (always works)
+  - **Jolt**: full body create/destroy, gravity, step, position/velocity queries
+- Box / Sphere / Capsule shapes
+- Static / Dynamic / Kinematic
 
-### Phase 1 – Foundation ✅
-- [x] Repository & project structure
-- [x] Platform layer (Windows window)
-- [x] Math library
-- [x] Logging system
-- [x] DirectX 12 RHI (device, swapchain, frames)
-- [x] Simple forward renderer structure
-- [x] ECS core
-- [x] CMake build system for Windows
+Enable:
+```bash
+cmake .. -DMUK_USE_JOLT=ON
+```
 
-### Phase 2 – Core Systems (In Progress)
-- [x] Mesh primitives + Material system
-- [x] Physics abstraction + simple solver
-- [x] AssetManager + glTF interface
-- [ ] Full triangle draw with vertex/index buffers + shaders
-- [ ] PBR shading
-- [ ] Shadow mapping
-- [ ] Real Jolt Physics integration
-- [ ] Skeletal animation
-- [ ] Audio
+### 4. Actual glTF Loading
+- `GltfLoader` via **tinygltf** (`.gltf` + `.glb`)
+- Reads POSITION, NORMAL, TEXCOORD_0 + index buffer
+- Cached in `AssetManager`
 
-### Phase 3 – Editor & Tools
-- [x] Editor host + entity hierarchy seed
-- [ ] Dear ImGui docking (Viewport, Hierarchy, Details)
-- [ ] Content browser
-- [ ] Material graph editor
-- [ ] Visual scripting
-- [ ] Sequencer
+Enable:
+```bash
+cmake .. -DMUK_USE_TINYGLTF=ON
+```
 
-### Phase 4 – Advanced
-- [ ] Virtualized geometry (Nanite-inspired)
-- [ ] Dynamic GI (Lumen-inspired)
-- [ ] Hardware ray tracing
-- [ ] Full multiplayer
-- [ ] Advanced particles
-- [ ] World partitioning / streaming
+---
 
-## Building on Windows
+## Build (Windows)
 
-### Prerequisites
-- Windows 10/11
-- Visual Studio 2022 (C++ Desktop Development workload)
-- CMake 3.25+
-- Git
-
-### Build Steps
+### Minimal (DX12 triangle, simple physics)
 ```bash
 git clone https://github.com/JagX-JRILICENSE/MukGameEngine.git
 cd MukGameEngine
@@ -130,62 +65,90 @@ cmake .. -G "Visual Studio 17 2022" -A x64
 cmake --build . --config Release
 ```
 
-Executables appear in `build/bin/`:
-- `MukRuntime.exe` – Sandbox / game host
-- `MukEditor.exe` – Editor host
+### Full feature set
+```bash
+cmake .. -G "Visual Studio 17 2022" -A x64 ^
+  -DMUK_USE_IMGUI=ON ^
+  -DMUK_USE_JOLT=ON ^
+  -DMUK_USE_TINYGLTF=ON
+cmake --build . --config Release
+```
 
-You should see a dark blue-gray window (DX12 clear color). Physics bodies are simulated in the background.
+First full configure will fetch ImGui (docking branch), Jolt, and tinygltf via CMake `FetchContent`.
 
-## Quick Example
+Executables: `build/bin/MukRuntime.exe`, `build/bin/MukEditor.exe`
+
+You should see a **colored triangle** on a dark blue-gray clear.
+
+---
+
+## Architecture
+
+```
+Engine/
+  Core/           Application, Window (Win32), Log
+  Math/           Vec2/3/4, Mat4
+  RHI/DX12/       DX12RHI + DX12Pipeline (root sig, PSO, buffers)
+  Renderer/       Mesh, Material, Renderer, Shaders/Basic.hlsl
+  ECS/            Entity, World, Components
+  Physics/        PhysicsWorld (simple + Jolt)
+  Asset/          AssetManager, GltfLoader
+  EditorUI/       Dear ImGui docking panels
+  Input/
+Editor/           Muk Editor host
+Runtime/          Sandbox / game host
+```
+
+---
+
+## Quick API
 
 ```cpp
 #include "Engine.h"
-
 using namespace Muk;
 
 class MyGame : public Application {
-protected:
-    void OnInit() override {
-        auto entity = ECS().CreateEntity();
-        auto& t = ECS().AddComponent<Transform>(entity);
-        t.Position = {0, 2, 0};
+  void OnInit() override {
+    auto mesh = Assets().GetMesh("Triangle");
+    Renderer().UploadMesh(*mesh);
 
-        RigidBodyDesc desc;
-        desc.Type = BodyType::Dynamic;
-        desc.Shape = ShapeType::Box;
-        desc.Position = {0, 5, 0};
-        Physics().CreateBody(desc);
-    }
+    // Or load glTF (needs MUK_USE_TINYGLTF):
+    // auto model = Assets().LoadMeshFromGLTF("Assets/model.glb");
 
-    void OnRender() override {
-        auto mesh = Assets().GetMesh("Cube");
-        auto mat  = Assets().GetMaterial("Default");
-        if (mesh && mat)
-            Renderer().DrawMesh(*mesh, Mat4::Identity(), *mat);
-    }
+    RigidBodyDesc desc;
+    desc.Type = BodyType::Dynamic;
+    desc.Shape = ShapeType::Box;
+    desc.Position = {0, 5, 0};
+    Physics().CreateBody(desc);
+  }
+
+  void OnRender() override {
+    auto mesh = Assets().GetMesh("Triangle");
+    auto mat  = Assets().GetMaterial("Default");
+    Renderer().DrawMesh(*mesh, Mat4::Scale({0.8f,0.8f,0.8f}), *mat);
+  }
 };
-
-int main() {
-    MyGame app;
-    app.Run();
-}
 ```
+
+---
+
+## Roadmap
+
+- [x] DX12 device, swapchain, triangle draw
+- [x] Editor docking panel structure
+- [x] Jolt integration path
+- [x] glTF mesh load path
+- [ ] Full ImGui DX12 descriptor heap wiring (SRV heap for fonts)
+- [ ] Depth buffer + camera MVP
+- [ ] Multiple mesh GPU buffers
+- [ ] Jolt layer interface polish + character controller
+- [ ] Materials / textures from glTF
+- [ ] Audio, animation, networking
+
+---
 
 ## License
 
-MIT License — free for commercial and non-commercial use.
-
-## Contributing
-
-Help is welcome on:
-- Completing the DX12 triangle (root signature, PSO, vertex buffers)
-- ImGui editor panels
-- Jolt Physics integration
-- glTF loading (tinygltf)
-- Documentation & samples
-
-Open issues and pull requests!
-
----
+MIT — free for commercial and non-commercial use.
 
 **Muk Game Engine** — Build worlds without limits.
