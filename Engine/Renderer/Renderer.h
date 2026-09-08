@@ -5,11 +5,22 @@
 #include "Mesh.h"
 #include "Material.h"
 #include "Math/Matrix.h"
+#include "Math/Vector.h"
 #include <memory>
+#include <string>
 
 namespace Muk {
 
-class DX12Pipeline; // forward
+class DX12Pipeline;
+
+struct CameraView {
+    Vec3 Eye{0.0f, 1.5f, -4.0f};
+    Vec3 Target{0.0f, 0.0f, 0.0f};
+    Vec3 Up{0.0f, 1.0f, 0.0f};
+    f32 FOVDegrees = 60.0f;
+    f32 Near = 0.1f;
+    f32 Far = 1000.0f;
+};
 
 class Renderer {
 public:
@@ -23,17 +34,26 @@ public:
     void EndFrame();
     void OnResize(u32 width, u32 height);
 
-    // Upload mesh once, then draw each frame with transform
-    bool UploadMesh(const Mesh& mesh);
+    bool UploadMesh(const std::string& name, const Mesh& mesh);
+    void SetCamera(const CameraView& camera);
+    void DrawMesh(const std::string& meshName, const Mat4& world, const Material& material);
+
+    // Legacy overload
     void DrawMesh(const Mesh& mesh, const Mat4& transform, const Material& material);
 
     RHI* GetRHI() const { return m_RHI.get(); }
+    Mat4 GetViewProjection() const { return m_ViewProjection; }
 
 private:
+    void RebuildViewProjection();
+
     std::unique_ptr<RHI> m_RHI;
     std::unique_ptr<DX12Pipeline> m_Pipeline;
+    CameraView m_Camera;
+    Mat4 m_ViewProjection = Mat4::Identity();
+    u32 m_Width = 1;
+    u32 m_Height = 1;
     bool m_Initialized = false;
-    bool m_MeshUploaded = false;
 };
 
 } // namespace Muk
