@@ -1,5 +1,6 @@
 #include "EditorUI.h"
 #include "Core/Log.h"
+#include "RHI/DX12/DX12RHI.h"
 
 #ifdef MUK_USE_IMGUI
 #include <imgui.h>
@@ -12,45 +13,62 @@
 
 namespace Muk {
 
-void EditorUI::Initialize(void* hwnd, void* d3d12Device, void* d3d12CommandQueue) {
+void EditorUI::Initialize(void* hwnd, DX12RHI* rhi) {
+    m_RHI = rhi;
+
 #ifdef MUK_USE_IMGUI
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    // Viewports need extra platform hooks; keep docking only for stability
     ImGui::StyleColorsDark();
 
 #ifdef MUK_PLATFORM_WINDOWS
     ImGui_ImplWin32_Init(hwnd);
-    // DX12 backend needs descriptor heap setup - simplified init marker
-    // Full descriptor heap wiring is done when MUK_USE_IMGUI + DX12 are both on.
-    (void)d3d12Device;
-    (void)d3d12CommandQueue;
-    // ImGui_ImplDX12_Init(...) requires SRV heap - see Docs/ImGuiSetup.md
+
+    if (rhi && rhi->GetDevice() && rhi->GetImGuiSrvHeap()) {
+        // Font texture uses descriptor slot 0 on the shader-visible SRV heap
+        D3D12_CPU_DESCRIPTOR_HANDLE fontCpu = rhi->GetImGuiSrvHeap()->GetCPUDescriptorHandleForHeapStart();
+        D3D12_GPU_DESCRIPTOR_HANDLE fontGpu = rhi->GetImGuiSrvHeap()->GetGPUDescriptorHandleForHeapStart();
+
+        ImGui_ImplDX12_Init(
+            rhi->GetDevice(),
+            (int)DX12RHI::GetFrameCount(),
+            rhi->GetBackBufferFormat(),
+            rhi->GetImGuiSrvHeap(),
+            fontCpu,
+            fontGpu
+        );
+        m_ImGuiDx12 = true;
+        Log("EditorUI: ImGui DX12 backend + font SRV heap ready");
+        MUK_CORE_INFO("ImGui DX12 font SRV heap initialized");
+    } else {
+        Log("EditorUI: ImGui Win32 only (no DX12 device for fonts)");
+    }
 #endif
 
     m_Initialized = true;
-    Log("EditorUI: Dear ImGui initialized with docking");
-    MUK_CORE_INFO("EditorUI: ImGui docking enabled");
 #else
     (void)hwnd;
-    (void)d3d12Device;
-    (void)d3d12CommandQueue;
+    (void)rhi;
     m_Initialized = true;
-    Log("EditorUI: Running without ImGui (console mode). Enable MUK_USE_IMGUI + FetchContent.");
-    MUK_CORE_INFO("EditorUI: console fallback mode (build with -DMUK_USE_IMGUI=ON)");
+    Log("EditorUI console mode - build with -DMUK_USE_IMGUI=ON");
 #endif
 }
 
 void EditorUI::Shutdown() {
 #ifdef MUK_USE_IMGUI
 #ifdef MUK_PLATFORM_WINDOWS
-    // ImGui_ImplDX12_Shutdown();
+    if (m_ImGuiDx12) {
+        ImGui_ImplDX12_Shutdown();
+        m_ImGuiDx12 = false;
+    }
     ImGui_ImplWin32_Shutdown();
 #endif
     ImGui::DestroyContext();
 #endif
+    m_RHI = nullptr;
     m_Initialized = false;
 }
 
@@ -58,8 +76,8 @@ void EditorUI::BeginFrame() {
 #ifdef MUK_USE_IMGUI
     if (!m_Initialized) return;
 #ifdef MUK_PLATFORM_WINDOWS
+    if (m_ImGuiDx12) ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
-    // ImGui_ImplDX12_NewFrame();
 #endif
     ImGui::NewFrame();
     m_WantsCaptureMouse = ImGui::GetIO().WantCaptureMouse;
@@ -67,12 +85,18 @@ void EditorUI::BeginFrame() {
 #endif
 }
 
-void EditorUI::EndFrame() {
+void EditorUI::RenderDrawData() {
 #ifdef MUK_USE_IMGUI
-    if (!m_Initialized) return;
+    if (!m_Initialized || !m_ImGuiDx12 || !m_RHI) return;
     ImGui::Render();
-    // ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), cmdList);
+    auto* cmd = m_RHI->GetCommandList();
+    // Heap already bound in DX12RHI::BeginFrame
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), cmd);
 #endif
+}
+
+void EditorUI::EndFrame() {
+    // Draw data already recorded in RenderDrawData
 }
 
 void EditorUI::DrawDockspace() {
@@ -97,31 +121,24 @@ void EditorUI::DrawDockspace() {
 
     if (ImGui::BeginMenuBar()) {
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("New Level")) {}
-            if (ImGui::MenuItem("Open Level...")) {}
-            if (ImGui::MenuItem("Save")) {}
+            ImGui::MenuItem("New Level");
+            ImGui::MenuItem("Open Level...");
+            ImGui::MenuItem("Save");
             ImGui::Separator();
-            if (ImGui::MenuItem("Exit")) {}
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("Edit")) {
-            if (ImGui::MenuItem("Undo", "Ctrl+Z")) {}
-            if (ImGui::MenuItem("Redo", "Ctrl+Y")) {}
+            ImGui::MenuItem("Exit");
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Window")) {
-            ImGui::MenuItem("Hierarchy", nullptr, true);
-            ImGui::MenuItem("Details", nullptr, true);
-            ImGui::MenuItem("Viewport", nullptr, true);
-            ImGui::MenuItem("Content Browser", nullptr, true);
-            ImGui::MenuItem("Console", nullptr, true);
+            ImGui::MenuItem("Hierarchy");
+            ImGui::MenuItem("Details");
+            ImGui::MenuItem("Viewport");
+            ImGui::MenuItem("Content Browser");
+            ImGui::MenuItem("Console");
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
     }
     ImGui::End();
-#else
-    // Console mode: nothing to draw
 #endif
 }
 
@@ -133,15 +150,11 @@ void EditorUI::DrawHierarchy(std::vector<EditorEntityInfo>& entities, Entity& se
         if (e.Handle.GetID() == selected.GetID())
             flags |= ImGuiTreeNodeFlags_Selected;
         ImGui::TreeNodeEx((void*)(uintptr_t)e.Handle.GetID(), flags, "%s", e.Name.c_str());
-        if (ImGui::IsItemClicked()) {
-            selected = e.Handle;
-            e.Selected = true;
-        }
+        if (ImGui::IsItemClicked()) selected = e.Handle;
     }
     ImGui::End();
 #else
-    (void)entities;
-    (void)selected;
+    (void)entities; (void)selected;
 #endif
 }
 
@@ -159,16 +172,12 @@ void EditorUI::DrawDetails(World& world, Entity selected) {
         }
         if (auto* mr = world.GetComponent<MeshRenderer>(selected)) {
             ImGui::Separator();
-            ImGui::Text("MeshRenderer");
             ImGui::Text("Mesh: %s", mr->MeshName.c_str());
             ImGui::Text("Material: %s", mr->MaterialName.c_str());
         }
         if (auto* cam = world.GetComponent<Camera>(selected)) {
             ImGui::Separator();
-            ImGui::Text("Camera");
-            ImGui::DragFloat("FOV", &cam->FOV, 0.5f, 10.0f, 120.0f);
-            ImGui::DragFloat("Near", &cam->Near, 0.01f);
-            ImGui::DragFloat("Far", &cam->Far, 1.0f);
+            ImGui::DragFloat("FOV", &cam->FOV, 0.5f, 10.f, 120.f);
             ImGui::Checkbox("Primary", &cam->Primary);
         }
     } else {
@@ -176,24 +185,24 @@ void EditorUI::DrawDetails(World& world, Entity selected) {
     }
     ImGui::End();
 #else
-    (void)world;
-    (void)selected;
+    (void)world; (void)selected;
 #endif
 }
 
 void EditorUI::DrawContentBrowser() {
 #ifdef MUK_USE_IMGUI
     ImGui::Begin("Content Browser");
-    ImGui::Text("Assets/");
     if (ImGui::TreeNode("Meshes")) {
-        ImGui::BulletText("Triangle");
-        ImGui::BulletText("Cube");
-        ImGui::BulletText("Quad");
+        ImGui::BulletText("Triangle / Cube / Quad");
+        ImGui::BulletText("glTF imports (cached by path)");
         ImGui::TreePop();
     }
     if (ImGui::TreeNode("Materials")) {
-        ImGui::BulletText("Default");
-        ImGui::BulletText("Red / Green / Blue");
+        ImGui::BulletText("Default / PBR from glTF");
+        ImGui::TreePop();
+    }
+    if (ImGui::TreeNode("Textures")) {
+        ImGui::BulletText("Albedo / Normal from glTF");
         ImGui::TreePop();
     }
     ImGui::End();
@@ -203,9 +212,8 @@ void EditorUI::DrawContentBrowser() {
 void EditorUI::DrawConsole() {
 #ifdef MUK_USE_IMGUI
     ImGui::Begin("Console");
-    for (const auto& line : m_ConsoleLines) {
+    for (const auto& line : m_ConsoleLines)
         ImGui::TextUnformatted(line.c_str());
-    }
     if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
         ImGui::SetScrollHereY(1.0f);
     ImGui::End();
@@ -216,9 +224,8 @@ void EditorUI::DrawViewportPlaceholder() {
 #ifdef MUK_USE_IMGUI
     ImGui::Begin("Viewport");
     ImVec2 size = ImGui::GetContentRegionAvail();
-    ImGui::Text("3D Viewport (%dx%d)", (int)size.x, (int)size.y);
-    ImGui::TextDisabled("Scene renders to the main swapchain for now.");
-    ImGui::TextDisabled("Future: render-to-texture displayed here.");
+    ImGui::Text("Scene (main swapchain)  %dx%d", (int)size.x, (int)size.y);
+    ImGui::TextDisabled("Depth buffer active | Camera MVP active");
     ImGui::End();
 #endif
 }
@@ -227,9 +234,7 @@ void EditorUI::Log(const std::string& message) {
     m_ConsoleLines.push_back(message);
     if (m_ConsoleLines.size() > MaxConsoleLines)
         m_ConsoleLines.erase(m_ConsoleLines.begin());
-#ifdef MUK_USE_IMGUI
-    // already stored for panel
-#else
+#ifndef MUK_USE_IMGUI
     MUK_CORE_INFO("[Editor] {0}", message.c_str());
 #endif
 }
