@@ -26,7 +26,6 @@ bool Renderer::Initialize(void* windowHandle, u32 width, u32 height) {
         if (!m_Pipeline->Initialize(dx12->GetDevice(), dx12->GetBackBufferFormat(), dx12->GetDepthFormat(),
                                     dx12->GetImGuiSrvHeap(), dx12->GetSrvDescriptorSize(),
                                     dx12->GetSrvBumpIndex(), dx12->GetSrvMaxCount())) {
-            MUK_CORE_ERROR("Failed to initialize DX12Pipeline");
             m_Pipeline.reset();
         }
         m_SceneRT = std::make_unique<DX12SceneRT>();
@@ -35,7 +34,6 @@ bool Renderer::Initialize(void* windowHandle, u32 width, u32 height) {
 
     RebuildViewProjection();
     m_Initialized = true;
-    MUK_CORE_INFO("Renderer ready (textures + SceneRT)");
     return true;
 }
 
@@ -46,17 +44,11 @@ void Renderer::Shutdown() {
     m_Initialized = false;
 }
 
-void Renderer::BeginFrame() {
-    if (m_RHI) m_RHI->BeginFrame();
-}
-
-void Renderer::EndFrame() {
-    if (m_RHI) m_RHI->EndFrame();
-}
+void Renderer::BeginFrame() { if (m_RHI) m_RHI->BeginFrame(); }
+void Renderer::EndFrame() { if (m_RHI) m_RHI->EndFrame(); }
 
 void Renderer::OnResize(u32 width, u32 height) {
-    m_Width = width;
-    m_Height = height;
+    m_Width = width; m_Height = height;
     if (m_RHI) m_RHI->Resize(width, height);
     RebuildViewProjection();
 }
@@ -64,6 +56,13 @@ void Renderer::OnResize(u32 width, u32 height) {
 void Renderer::SetCamera(const CameraView& camera) {
     m_Camera = camera;
     RebuildViewProjection();
+}
+
+void Renderer::SetDirectionalLight(const Vec3& dir, const Vec3& color, f32 intensity, f32 ambient) {
+    m_LightDir = dir;
+    m_LightColor = color;
+    m_LightIntensity = intensity;
+    m_Ambient = ambient;
 }
 
 void Renderer::RebuildViewProjection() {
@@ -100,7 +99,6 @@ void Renderer::DrawMesh(const std::string& meshName, const Mat4& world, const Ma
     auto* dx12 = dynamic_cast<DX12RHI*>(m_RHI.get());
     if (!dx12 || !m_Pipeline || !m_Pipeline->IsReady()) return;
 
-    // Ensure albedo on GPU
     if (material.AlbedoMap && material.AlbedoMap->IsValid()) {
         std::string key = material.AlbedoTexture.empty() ? material.AlbedoMap->Name : material.AlbedoTexture;
         if (!key.empty())
@@ -110,9 +108,8 @@ void Renderer::DrawMesh(const std::string& meshName, const Mat4& world, const Ma
     Mat4 mvp = m_ViewProjection * world;
     auto* cmd = dx12->GetCommandList();
     m_Pipeline->Bind(cmd);
-    m_Pipeline->SetMaterialParams(mvp, material);
+    m_Pipeline->SetDrawParams(mvp, world, material, m_LightDir, m_LightColor, m_LightIntensity, m_Ambient);
 
-    // Bind albedo SRV table
     D3D12_GPU_DESCRIPTOR_HANDLE srv = m_Pipeline->Textures().GetWhiteSrv();
     if (material.AlbedoMap) {
         std::string key = material.AlbedoTexture.empty() ? material.AlbedoMap->Name : material.AlbedoTexture;
@@ -120,7 +117,6 @@ void Renderer::DrawMesh(const std::string& meshName, const Mat4& world, const Ma
             srv = gpu->GpuSrv;
     }
     cmd->SetGraphicsRootDescriptorTable(1, srv);
-
     m_Pipeline->DrawMesh(cmd, meshName);
 #else
     (void)meshName; (void)world; (void)material;
@@ -151,7 +147,7 @@ void Renderer::BeginSceneRT() {
 #ifdef MUK_RHI_DX12
     auto* dx12 = dynamic_cast<DX12RHI*>(m_RHI.get());
     if (!dx12 || !m_SceneRT || !m_SceneRT->IsValid()) return;
-    const float clear[4] = { 0.1f, 0.12f, 0.18f, 1.0f };
+    const float clear[4] = { 0.08f, 0.09f, 0.12f, 1.0f };
     m_SceneRT->Begin(dx12->GetCommandList(), clear);
     m_RenderingToSceneRT = true;
     RebuildViewProjection();
@@ -172,7 +168,6 @@ void Renderer::EndSceneRT() {
 void* Renderer::GetSceneRTGpuHandle() const {
 #ifdef MUK_RHI_DX12
     if (m_SceneRT && m_SceneRT->IsValid()) {
-        // ImGui expects ImTextureID = GPU handle ptr value on DX12
         auto h = m_SceneRT->GetColorSrvGpu();
         return (void*)h.ptr;
     }
@@ -183,7 +178,6 @@ void* Renderer::GetSceneRTGpuHandle() const {
 u32 Renderer::GetSceneRTWidth() const {
     return m_SceneRT && m_SceneRT->IsValid() ? m_SceneRT->GetWidth() : 0;
 }
-
 u32 Renderer::GetSceneRTHeight() const {
     return m_SceneRT && m_SceneRT->IsValid() ? m_SceneRT->GetHeight() : 0;
 }
