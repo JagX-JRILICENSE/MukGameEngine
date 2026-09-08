@@ -26,7 +26,7 @@ bool DX12RHI::Initialize(void* nativeWindowHandle, u32 width, u32 height) {
     if (!CreateImGuiSrvHeap()) { MUK_CORE_ERROR("DX12: Failed to create ImGui SRV heap"); return false; }
 
     m_Initialized = true;
-    MUK_CORE_INFO("DX12 RHI initialized ({0}x{1}) with depth + ImGui SRV heap", width, height);
+    MUK_CORE_INFO("DX12 RHI initialized ({0}x{1}) with depth + SRV heap", width, height);
     return true;
 }
 
@@ -56,7 +56,6 @@ void DX12RHI::Shutdown() {
     m_Factory.Reset();
 
     m_Initialized = false;
-    MUK_CORE_INFO("DX12 RHI shut down");
 }
 
 bool DX12RHI::CreateDevice() {
@@ -209,7 +208,7 @@ bool DX12RHI::CreateImGuiSrvHeap() {
         return false;
 
     m_SrvDescriptorSize = m_Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    m_ImGuiSrvNext = 1; // slot 0 reserved for ImGui font texture
+    m_ImGuiSrvNext = 1;
     return true;
 }
 
@@ -238,8 +237,21 @@ D3D12_CPU_DESCRIPTOR_HANDLE DX12RHI::AllocImGuiSrv(D3D12_GPU_DESCRIPTOR_HANDLE* 
     return cpu;
 }
 
-void DX12RHI::FreeImGuiSrv(D3D12_CPU_DESCRIPTOR_HANDLE) {
-    // Bump allocator - no recycle in v0.3
+void DX12RHI::FreeImGuiSrv(D3D12_CPU_DESCRIPTOR_HANDLE) {}
+
+void DX12RHI::BindSwapchainTargets() {
+    auto rtv = GetCurrentRTV();
+    auto dsv = GetDSV();
+    m_CommandList->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
+
+    D3D12_VIEWPORT viewport = {};
+    viewport.Width = static_cast<float>(m_Width);
+    viewport.Height = static_cast<float>(m_Height);
+    viewport.MaxDepth = 1.0f;
+    m_CommandList->RSSetViewports(1, &viewport);
+
+    D3D12_RECT scissor = { 0, 0, static_cast<LONG>(m_Width), static_cast<LONG>(m_Height) };
+    m_CommandList->RSSetScissorRects(1, &scissor);
 }
 
 void DX12RHI::BeginFrame() {
@@ -260,24 +272,12 @@ void DX12RHI::BeginFrame() {
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     m_CommandList->ResourceBarrier(1, &barrier);
 
-    auto rtv = GetCurrentRTV();
-    auto dsv = GetDSV();
-    m_CommandList->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
+    BindSwapchainTargets();
 
-    const float clearColor[] = { 0.08f, 0.08f, 0.12f, 1.0f };
-    m_CommandList->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
-    m_CommandList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+    const float clearColor[] = { 0.05f, 0.05f, 0.07f, 1.0f };
+    m_CommandList->ClearRenderTargetView(GetCurrentRTV(), clearColor, 0, nullptr);
+    m_CommandList->ClearDepthStencilView(GetDSV(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-    D3D12_VIEWPORT viewport = {};
-    viewport.Width = static_cast<float>(m_Width);
-    viewport.Height = static_cast<float>(m_Height);
-    viewport.MaxDepth = 1.0f;
-    m_CommandList->RSSetViewports(1, &viewport);
-
-    D3D12_RECT scissor = { 0, 0, static_cast<LONG>(m_Width), static_cast<LONG>(m_Height) };
-    m_CommandList->RSSetScissorRects(1, &scissor);
-
-    // Bind ImGui SRV heap for the frame (safe even if ImGui unused)
     if (m_ImGuiSrvHeap) {
         ID3D12DescriptorHeap* heaps[] = { m_ImGuiSrvHeap.Get() };
         m_CommandList->SetDescriptorHeaps(1, heaps);
@@ -342,8 +342,6 @@ void DX12RHI::Resize(u32 width, u32 height) {
     m_FrameIndex = m_Swapchain->GetCurrentBackBufferIndex();
     CreateRTVs();
     CreateDepthBuffer();
-
-    MUK_CORE_INFO("DX12: Resized to {0}x{1}", width, height);
 }
 
 } // namespace Muk
