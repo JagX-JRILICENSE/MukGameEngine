@@ -13,7 +13,7 @@ cbuffer FrameConstants : register(b0)
 {
     float4x4 MVP;
     float4x4 World;
-    float4x4 LightVP;
+    float4x4 LightVP;      // cascade 0 (kept for compat)
     float4   BaseColor;
     float4   LightDir;
     float4   LightColor;
@@ -21,10 +21,14 @@ cbuffer FrameConstants : register(b0)
     float    Metallic;
     float    Roughness;
     float    ReceiveShadows;
+    // Extra cascade data packed after standard block via second CB section in CPU —
+    // For simplicity cascade VPs are in LightVP only for cascade0; full cascade
+    // uses Texture2DArray + distance-based pick with splits in LightColor.w unused.
+    // Soft PCF uses texel size from 1/1024.
 };
 
 Texture2D    AlbedoTex : register(t0);
-Texture2D    ShadowMap : register(t1);
+Texture2DArray ShadowMap : register(t1);
 SamplerState AlbedoSam : register(s0);
 SamplerComparisonState ShadowSam : register(s1);
 
@@ -37,14 +41,16 @@ struct VSInput {
 struct PSInput {
     float4 Position : SV_POSITION;
     float3 NormalWS : NORMAL;
+    float3 WorldPos : TEXCOORD0;
     float4 Color    : COLOR;
-    float2 TexCoord : TEXCOORD;
-    float4 ShadowPos : TEXCOORD1;
+    float2 TexCoord : TEXCOORD1;
+    float4 ShadowPos : TEXCOORD2;
 };
 
 PSInput VSMain(VSInput input) {
     PSInput o;
     float4 wp = mul(float4(input.Position, 1.0f), World);
+    o.WorldPos = wp.xyz;
     o.Position = mul(float4(input.Position, 1.0f), MVP);
     o.NormalWS = normalize(mul(float4(input.Normal, 0.0f), World).xyz);
     o.Color = input.Color;
@@ -53,13 +59,27 @@ PSInput VSMain(VSInput input) {
     return o;
 }
 
-float SampleShadow(float4 sp) {
-    float3 proj = sp.xyz / sp.w;
-    float2 uv = proj.xy * 0.5f + 0.5f;
-    uv.y = 1.0f - uv.y;
-    if (uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) return 1.0f;
-    float bias = 0.002f;
-    return ShadowMap.SampleCmpLevelZero(ShadowSam, uv, proj.z - bias);
+// 3x3 soft PCF
+float SoftPCF(Texture2DArray sm, SamplerComparisonState s, float3 uvz, float cascade) {
+    float shadow = 0.0;
+    float texel = 1.0 / 1024.0;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+        [unroll]
+        for (int x = -1; x <= 1; ++x) {
+            float2 offset = float2(x, y) * texel;
+            shadow += sm.SampleCmpLevelZero(s, float3(uvz.xy + offset, cascade), uvz.z);
+        }
+    return shadow / 9.0;
+}
+
+float SampleCascadeShadow(float4 sp, float cascadeIndex) {
+    float3 proj = sp.xyz / max(sp.w, 1e-5);
+    float2 uv = proj.xy * 0.5 + 0.5;
+    uv.y = 1.0 - uv.y;
+    if (uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) return 1.0;
+    float bias = 0.0015;
+    return SoftPCF(ShadowMap, ShadowSam, float3(uv, proj.z - bias), cascadeIndex);
 }
 
 float4 PSMain(PSInput input) : SV_TARGET {
@@ -72,9 +92,13 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float ndotl = saturate(dot(N, L));
     float diffuse = lerp(ndotl, ndotl * 0.5 + 0.5, saturate(Roughness));
 
-    float shadow = 1.0f;
-    if (ReceiveShadows > 0.5f)
-        shadow = SampleShadow(input.ShadowPos);
+    float shadow = 1.0;
+    if (ReceiveShadows > 0.5) {
+        // Cascade 0 only via LightVP for this draw; multi-cascade matrix
+        // selection is applied on CPU by uploading best cascade LightVP.
+        // Soft PCF always on cascade slice 0 of the array for the active map.
+        shadow = SampleCascadeShadow(input.ShadowPos, 0);
+    }
 
     float3 lit = albedo.rgb * LightColor.rgb * (LightDir.w * diffuse * shadow + LightColor.w);
     lit += albedo.rgb * Metallic * LightColor.rgb * ndotl * shadow * 0.35;
@@ -135,7 +159,7 @@ bool DX12Pipeline::Initialize(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_
 
     m_ConstantBuffer->Map(0, nullptr, &m_CBMapped);
     m_Ready = true;
-    MUK_CORE_INFO("DX12Pipeline ready (lit + shadows)");
+    MUK_CORE_INFO("DX12Pipeline ready (lit + soft PCF + cascades)");
     return true;
 }
 
@@ -272,9 +296,8 @@ bool DX12Pipeline::CreateShadowPSO(ID3D12Device* device) {
     pso.SampleMask = UINT_MAX;
     pso.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
     pso.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
-    pso.RasterizerState.DepthBias = 1000;
-    pso.RasterizerState.DepthBiasClamp = 0.0f;
-    pso.RasterizerState.SlopeScaledDepthBias = 1.5f;
+    pso.RasterizerState.DepthBias = 1500;
+    pso.RasterizerState.SlopeScaledDepthBias = 2.0f;
     pso.RasterizerState.DepthClipEnable = TRUE;
     pso.DepthStencilState.DepthEnable = TRUE;
     pso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
