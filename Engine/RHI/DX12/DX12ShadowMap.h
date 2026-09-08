@@ -10,9 +10,11 @@ namespace Muk {
 
 using Microsoft::WRL::ComPtr;
 
+static constexpr u32 kShadowCascades = 3;
+
 /**
- * Single-cascade directional shadow map.
- * Depth-only render target + shader-visible SRV for sampling in lit pass.
+ * Cascaded directional shadow maps (3 cascades) as Texture2DArray.
+ * Soft PCF is done in the lit shader.
  */
 class DX12ShadowMap {
 public:
@@ -20,26 +22,29 @@ public:
                 ID3D12DescriptorHeap* srvHeap, u32 srvSize, u32* srvNext, u32 srvMax);
     void Destroy();
 
-    void Begin(ID3D12GraphicsCommandList* cmd);
-    void End(ID3D12GraphicsCommandList* cmd);
+    // cascadeIndex 0..2
+    void BeginCascade(ID3D12GraphicsCommandList* cmd, u32 cascadeIndex);
+    void EndAll(ID3D12GraphicsCommandList* cmd); // transition array to SRV
 
-    // Light-space VP looking along -lightDir toward scene center
-    void UpdateLightMatrix(const Vec3& lightDir, const Vec3& focus, f32 radius, f32 nearZ = 0.5f, f32 farZ = 80.0f);
+    void UpdateCascades(const Vec3& lightDir, const Vec3& focus,
+                        f32 maxRadius = 40.0f);
 
-    Mat4 GetLightViewProj() const { return m_LightVP; }
+    Mat4 GetLightViewProj(u32 cascade) const;
+    const Mat4* GetAllLightVPs() const { return m_LightVP; }
+    f32 GetCascadeSplit(u32 i) const { return m_Splits[i]; }
+
     D3D12_GPU_DESCRIPTOR_HANDLE GetDepthSrvGpu() const { return m_SrvGpu; }
-    D3D12_CPU_DESCRIPTOR_HANDLE GetDSV() const { return m_DsvCpu; }
     u32 GetResolution() const { return m_Resolution; }
     bool IsValid() const { return m_Valid; }
-    ID3D12Resource* GetResource() const { return m_Depth.Get(); }
 
 private:
-    ComPtr<ID3D12Resource> m_Depth;
+    ComPtr<ID3D12Resource> m_DepthArray;
     ComPtr<ID3D12DescriptorHeap> m_DsvHeap;
-    D3D12_CPU_DESCRIPTOR_HANDLE m_DsvCpu = {};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_DsvCpu[kShadowCascades] = {};
     D3D12_CPU_DESCRIPTOR_HANDLE m_SrvCpu = {};
     D3D12_GPU_DESCRIPTOR_HANDLE m_SrvGpu = {};
-    Mat4 m_LightVP = Mat4::Identity();
+    Mat4 m_LightVP[kShadowCascades];
+    f32 m_Splits[kShadowCascades] = { 8.f, 20.f, 40.f };
     u32 m_Resolution = 1024;
     bool m_Valid = false;
     bool m_InShaderReadable = false;
