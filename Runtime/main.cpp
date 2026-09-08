@@ -5,24 +5,28 @@ using namespace Muk;
 class SandboxApp : public Application {
 protected:
     void OnInit() override {
-        MUK_CORE_INFO("Sandbox: uploading triangle mesh to GPU");
+        // Camera looking at origin
+        CameraView cam;
+        cam.Eye = {0.0f, 1.2f, -3.5f};
+        cam.Target = {0.0f, 0.0f, 0.0f};
+        cam.FOVDegrees = 60.0f;
+        Renderer().SetCamera(cam);
 
-        auto mesh = Assets().GetMesh("Triangle");
-        if (mesh) {
-            Renderer().UploadMesh(*mesh);
-        }
+        // Multi-mesh GPU cache
+        if (auto tri = Assets().GetMesh("Triangle"))
+            Renderer().UploadMesh("Triangle", *tri);
+        if (auto cube = Assets().GetMesh("Cube"))
+            Renderer().UploadMesh("Cube", *cube);
 
-        // Physics demo body
         RigidBodyDesc desc;
         desc.Type = BodyType::Dynamic;
         desc.Shape = ShapeType::Box;
         desc.Position = {0.0f, 5.0f, 0.0f};
         desc.HalfExtents = {0.5f, 0.5f, 0.5f};
-        desc.Mass = 1.0f;
         desc.Restitution = 0.3f;
         m_PhysicsBody = Physics().CreateBody(desc);
 
-        MUK_CORE_INFO("Sandbox ready - you should see a colored triangle");
+        MUK_CORE_INFO("Sandbox: depth + camera MVP + multi-mesh cache ready");
     }
 
     void OnUpdate(float deltaTime) override {
@@ -31,13 +35,16 @@ protected:
     }
 
     void OnRender() override {
-        auto mesh = Assets().GetMesh("Triangle");
-        auto material = Assets().GetMaterial("Default");
-        if (!mesh || !material) return;
+        auto mat = Assets().GetMaterial("Default");
+        if (!mat) return;
 
-        // Simple orthographic-ish scale so triangle is visible in NDC
-        Mat4 transform = Mat4::Scale({0.8f, 0.8f, 0.8f});
-        Renderer().DrawMesh(*mesh, transform, *material);
+        // Triangle slightly in front
+        Mat4 triWorld = Mat4::Translation({-0.8f, 0.0f, 0.0f}) * Mat4::Scale({0.6f, 0.6f, 0.6f});
+        Renderer().DrawMesh("Triangle", triWorld, *mat);
+
+        // Cube to the right
+        Mat4 cubeWorld = Mat4::Translation({0.9f, 0.0f, 0.0f}) * Mat4::Scale({0.5f, 0.5f, 0.5f});
+        Renderer().DrawMesh("Cube", cubeWorld, *mat);
     }
 
     void OnShutdown() override {
