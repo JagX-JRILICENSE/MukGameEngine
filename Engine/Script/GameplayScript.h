@@ -6,32 +6,10 @@
 #include <vector>
 #include <unordered_map>
 #include <functional>
+#include <unordered_set>
 
 namespace Muk {
 
-class World;
-class Renderer;
-class AudioSystem;
-struct EditorEntityInfo;
-class Entity;
-
-/**
- * Muk Script — simple line-based gameplay language AI can emit.
- *
- * Examples:
- *   set score 0
- *   on_start
- *     spawn_at Player 0 1 0
- *     load_level arena
- *     show_ui title "Get the orbs"
- *   on_update dt
- *     if key W then move Player 0 0 5*dt
- *     if score >= 3 then win "You win"
- *   on_trigger Player Orb
- *     add score 1
- *     destroy Orb
- *     play_sound success
- */
 struct ScriptHostCallbacks {
     std::function<void(const std::string& name, float x, float y, float z, float sx, float sy, float sz, const std::string& mesh)> Spawn;
     std::function<void(const std::string& name)> DestroyByName;
@@ -59,6 +37,10 @@ public:
     void CallOnUpdate(ScriptHostCallbacks& host, float dt);
     void CallOnTrigger(ScriptHostCallbacks& host, const std::string& a, const std::string& b);
 
+    // Distance triggers: when |A-B| < radius, fire once (orb pickup)
+    void RegisterProximity(const std::string& a, const std::string& b, float radius);
+    void UpdateProximity(ScriptHostCallbacks& host);
+
     bool HasErrors() const { return !m_Errors.empty(); }
     const std::vector<std::string>& Errors() const { return m_Errors; }
 
@@ -67,9 +49,15 @@ private:
 
     struct Line {
         Block BlockKind = Block::None;
-        std::string TriggerA, TriggerB; // for OnTrigger header
+        std::string TriggerA, TriggerB;
         std::string Raw;
         int Indent = 0;
+    };
+
+    struct Proximity {
+        std::string A, B;
+        float Radius = 1.5f;
+        bool Fired = false;
     };
 
     void ExecLine(const std::string& raw, ScriptHostCallbacks& host, float dt);
@@ -80,16 +68,15 @@ private:
     std::vector<Line> m_Lines;
     std::unordered_map<std::string, float> m_Vars;
     std::vector<std::string> m_Errors;
-    std::string m_CurrentTriggerA, m_CurrentTriggerB;
+    std::vector<Proximity> m_Proximity;
 };
 
-/** Runtime: levels + scripts + simple HUD state */
 class GameRuntime {
 public:
     struct Level {
         std::string Id;
         std::string Name;
-        std::string SceneActions; // ACTION lines to rebuild level
+        std::string SceneActions;
         std::string ScriptSource;
     };
 
@@ -117,6 +104,9 @@ public:
     const std::string& Banner() const { return m_Banner; }
     bool HasWon() const { return m_Won; }
     bool HasLost() const { return m_Lost; }
+
+    // Auto-save generated script under Assets/Scripts/
+    static bool SaveScriptToAssets(const std::string& source, const std::string& filename);
 
     ScriptHostCallbacks& Host() { return m_Host; }
 
