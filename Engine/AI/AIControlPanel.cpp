@@ -14,9 +14,15 @@ namespace Muk {
 
 void AIControlPanel::Initialize() {
     m_Settings.Load();
+    // Prefer free defaults if model empty
+    if (m_Settings.OpenRouterModel.empty())
+        m_Settings.OpenRouterModel = "nvidia/nemotron-3.5-lightning:free";
+    if (m_Settings.NvidiaModel.empty())
+        m_Settings.NvidiaModel = "meta/llama-3.1-8b-instruct";
     m_Client.SetSettings(m_Settings);
-    m_Log.push_back("AI Control ready (BYOK). Try: 'move camera closer' or ask for ACTION: spawn_cube");
-    m_Log.push_back("Settings: " + UserSettings::SettingsPath());
+    m_Log.push_back("AI Control (BYOK) — free models listed for OpenRouter + NVIDIA");
+    m_Log.push_back("Keys: openrouter.ai/keys | build.nvidia.com (Get API Key)");
+    m_Log.push_back("Settings file: " + UserSettings::SettingsPath());
 }
 
 void AIControlPanel::ApplySimpleActions(Renderer& renderer, const std::string& reply) {
@@ -56,7 +62,7 @@ void AIControlPanel::ApplySimpleActions(Renderer& renderer, const std::string& r
             auto& mr = world.AddComponent<MeshRenderer>(e);
             mr.MeshName = "Cube";
             mr.MaterialName = "Default";
-            m_Log.push_back("[Applied] spawn_cube at " + std::to_string(x) + "," + std::to_string(y) + "," + std::to_string(z));
+            m_Log.push_back("[Applied] spawn_cube");
         }
     }
 }
@@ -77,14 +83,43 @@ void AIControlPanel::Draw(Renderer& renderer) {
     }
 
     ImGui::Separator();
-    ImGui::Text("API key (this PC only)");
+    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.5f, 1), "FREE models");
+
+    if (m_Settings.Provider == "openrouter") {
+        ImGui::TextWrapped("OpenRouter free IDs end with :free (rate limits apply). Key: openrouter.ai/keys");
+        const auto& models = UserSettings::OpenRouterFreeModels();
+        for (const auto& m : models) {
+            bool selected = (m_Settings.OpenRouterModel == m.Id);
+            if (ImGui::Selectable(m.Label, selected)) {
+                m_Settings.OpenRouterModel = m.Id;
+                m_Client.SetSettings(m_Settings);
+                m_Log.push_back(std::string("Model → ") + m.Id);
+            }
+        }
+    } else if (m_Settings.Provider == "nvidia") {
+        ImGui::TextWrapped("NVIDIA integrate.api.nvidia.com — free/credit tier. Key: build.nvidia.com → Get API Key (nvapi-...)");
+        const auto& models = UserSettings::NvidiaFreeModels();
+        for (const auto& m : models) {
+            bool selected = (m_Settings.NvidiaModel == m.Id);
+            if (ImGui::Selectable(m.Label, selected)) {
+                m_Settings.NvidiaModel = m.Id;
+                m_Client.SetSettings(m_Settings);
+                m_Log.push_back(std::string("Model → ") + m.Id);
+            }
+        }
+    } else {
+        ImGui::TextDisabled("Select OpenRouter or NVIDIA to see free model lists");
+    }
+
+    ImGui::Separator();
+    ImGui::Text("API key (saved only on this PC)");
     std::string active = m_Settings.ActiveApiKey();
     if (active.size() > 8)
         ImGui::TextDisabled("Key set: %s...%s", active.substr(0, 4).c_str(), active.substr(active.size() - 4).c_str());
     else if (!active.empty())
         ImGui::TextDisabled("Key set");
     else
-        ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "No key — paste + Save");
+        ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "Paste key below → Apply → Save");
 
     ImGui::InputText("##key", m_KeyEdit, sizeof(m_KeyEdit), ImGuiInputTextFlags_Password);
     if (ImGui::Button("Apply key")) {
@@ -93,20 +128,21 @@ void AIControlPanel::Draw(Renderer& renderer) {
         else if (m_Settings.Provider == "custom") m_Settings.CustomApiKey = m_KeyEdit;
         else m_Settings.OpenRouterApiKey = m_KeyEdit;
         m_Client.SetSettings(m_Settings);
-        m_Log.push_back("Key applied in memory");
+        m_Log.push_back("Key applied (in memory)");
     }
     ImGui::SameLine();
     if (ImGui::Button("Save")) {
-        m_Log.push_back(m_Settings.Save() ? "Saved settings" : "Save failed");
+        m_Log.push_back(m_Settings.Save() ? "Saved to " + UserSettings::SettingsPath() : "Save failed");
     }
     ImGui::SameLine();
     if (ImGui::Button("Reload")) {
         m_Settings.Load();
         m_Client.SetSettings(m_Settings);
+        m_Log.push_back("Reloaded settings");
     }
 
-    ImGui::Text("Model: %s", m_Settings.ActiveModel().c_str());
-    ImGui::InputTextMultiline("##prompt", m_Input, sizeof(m_Input), ImVec2(-1, 80));
+    ImGui::Text("Active: %s", m_Settings.ActiveModel().c_str());
+    ImGui::InputTextMultiline("##prompt", m_Input, sizeof(m_Input), ImVec2(-1, 70));
     if (ImGui::Button("Send") && !m_Busy && std::strlen(m_Input) > 0) {
         m_Busy = true;
         m_Log.push_back(std::string("You: ") + m_Input);
@@ -116,6 +152,8 @@ void AIControlPanel::Draw(Renderer& renderer) {
             ApplySimpleActions(renderer, resp.Content);
         } else {
             m_Log.push_back(std::string("Error: ") + resp.Error);
+            if (!resp.RawJson.empty() && resp.RawJson.size() < 500)
+                m_Log.push_back(resp.RawJson);
         }
         m_Busy = false;
         m_Input[0] = 0;
@@ -125,6 +163,8 @@ void AIControlPanel::Draw(Renderer& renderer) {
     ImGui::BeginChild("ailog", ImVec2(0, 0), true);
     for (const auto& line : m_Log)
         ImGui::TextWrapped("%s", line.c_str());
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+        ImGui::SetScrollHereY(1.0f);
     ImGui::EndChild();
     ImGui::End();
 #else
