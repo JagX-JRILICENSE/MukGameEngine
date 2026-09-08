@@ -1,43 +1,48 @@
-# Muk Game Engine v0.6.1
+# Muk Game Engine v0.7
 
-C++20 / DirectX 12 Windows engine.
+C++20 / DirectX 12 Windows engine with AI-assisted building.
 
 **Repo:** https://github.com/JagX-JRILICENSE/MukGameEngine
 
 ---
 
-## Download Windows app (CI)
+## v0.7 highlights
 
-1. Open **Actions** → **Windows Build**
-2. Open the latest **green** run (or **Run workflow**)
-3. Download artifact **`MukGameEngine-Windows-x64`**
-4. Unzip → run `bin\MukEditor.exe`
-
-Main CI builds **ImGui + tinygltf** (stable). Jolt is optional/non-blocking.
+| Area | Status |
+|------|--------|
+| **Per-pixel cascades** | 3 LightVPs + splits in CB; distance pick + soft PCF |
+| **Skinned animation** | Skeleton / clips / Animator + demo Wave arm |
+| **Spatial audio** | XAudio2 init + tone clips + distance attenuation |
+| **Content Browser** | Scan Assets/, import/reimport glTF |
+| **Save / load world** | JSON scene serializer |
+| **Reflection UI** | Generic Details for Transform/Mesh/Light/Camera |
+| **PBR-ish look** | Hemisphere IBL + exposure Reinhard tonemap |
+| **AI Game Builder** | Plan → build → preview → verify → fix loop |
 
 ---
 
-## Free AI (OpenRouter + NVIDIA)
+## AI Game Builder (autonomous)
 
-Keys stay on your PC. Defaults use **free** models.
+1. Set OpenRouter/NVIDIA **API key** in **AI Control** (free models supported)
+2. Open **AI Game Builder**
+3. Describe a scene/game (e.g. *“arena with floor, 4 pillars, player cube”*)
+4. Click **Build with AI**
 
-### OpenRouter (free `:free` models)
+The agent:
+- plans with ACTION lines
+- spawns meshes / sets camera / light / materials
+- moves “cursor” (`select` + `focus_camera`)
+- frames a **preview**
+- **verifies** entity counts / floor / issues
+- **fixes** and retries (up to 4)
 
-1. Create a key at https://openrouter.ai/keys  
-2. In editor **AI Control** → provider `openrouter` → paste key → **Apply** → **Save**  
-3. Click a **FREE** model, e.g.:
-   - `nvidia/nemotron-3.5-lightning:free`
-   - `nvidia/nemotron-3-ultra-550b-a55b:free`
-   - `google/gemma-4-31b-it:free`
-   - `openrouter/free`
+This is an **assistive designer**, not a full game programmer. It builds layouts and iterates; gameplay scripts still need you.
 
-### NVIDIA (build.nvidia.com)
+---
 
-1. Sign in at https://build.nvidia.com → **Get API Key** (`nvapi-...`)  
-2. Provider `nvidia` → paste key → pick e.g. `meta/llama-3.1-8b-instruct`  
-3. Base URL: `https://integrate.api.nvidia.com/v1`
+## Download Windows app
 
-Or edit `%APPDATA%\MukGameEngine\settings.ini` (see `config/settings.example.ini`).
+**Actions** → **Windows Build** → artifact `MukGameEngine-Windows-x64` → `bin\MukEditor.exe`
 
 ---
 
@@ -47,7 +52,6 @@ Or edit `%APPDATA%\MukGameEngine\settings.ini` (see `config/settings.example.ini
 cmake -B build -G "Visual Studio 17 2022" -A x64 `
   -DMUK_USE_IMGUI=ON -DMUK_USE_TINYGLTF=ON -DMUK_USE_JOLT=OFF
 cmake --build build --config Release
-# Exe: build\bin\Release\MukEditor.exe
 ```
 
 ---
