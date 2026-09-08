@@ -1,5 +1,6 @@
 #include "Engine.h"
 #include "EditorUI/EditorUI.h"
+#include "AI/AIControlPanel.h"
 #include "RHI/DX12/DX12RHI.h"
 
 using namespace Muk;
@@ -9,6 +10,7 @@ protected:
     void OnInit() override {
         auto* dx = dynamic_cast<DX12RHI*>(Renderer().GetRHI());
         m_UI.Initialize(Window().GetNativeHandle(), dx);
+        m_AI.Initialize();
 
         CameraView cam;
         cam.Eye = {0.0f, 2.0f, -5.0f};
@@ -24,9 +26,7 @@ protected:
         if (auto cube = Assets().GetMesh("Cube"))
             Renderer().UploadMesh("Cube", *cube);
 
-        // Demo textured material using solid CPU texture uploaded to GPU
         auto checker = Texture::CreateSolid(64, 64, 200, 180, 60);
-        // Simple checker pattern
         for (u32 y = 0; y < 64; ++y)
             for (u32 x = 0; x < 64; ++x) {
                 bool c = ((x / 8) + (y / 8)) & 1;
@@ -39,11 +39,10 @@ protected:
         checker->Name = "Checker";
         Renderer().UploadTexture("Checker", *checker);
         m_TexMat = Material::CreateDefault();
-        m_TexMat.Name = "CheckerMat";
         m_TexMat.AlbedoMap = checker;
         m_TexMat.AlbedoTexture = "Checker";
 
-        m_UI.Log("SceneRT viewport + GPU albedo sampling enabled");
+        m_UI.Log("Realtime viewport + AI BYOK panel ready");
     }
 
     void OnUpdate(float) override {}
@@ -55,23 +54,20 @@ protected:
         m_UI.DrawDetails(ECS(), m_Selected);
         m_UI.DrawContentBrowser();
         m_UI.DrawConsole();
+        m_AI.Draw(Renderer());
 
-        // Resize RTT to viewport panel size
         u32 vw = m_UI.GetDesiredViewportWidth();
         u32 vh = m_UI.GetDesiredViewportHeight();
         Renderer().EnsureSceneRT(vw, vh);
 
-        // Draw scene into offscreen target
         Renderer().BeginSceneRT();
         Renderer().DrawMesh("Triangle",
             Mat4::Translation({-0.8f, 0, 0}) * Mat4::Scale({0.5f, 0.5f, 0.5f}), m_TexMat);
-        auto def = Assets().GetMaterial("Default");
-        if (def)
+        if (auto def = Assets().GetMaterial("Default"))
             Renderer().DrawMesh("Cube",
                 Mat4::Translation({0.9f, 0, 0}) * Mat4::Scale({0.4f, 0.4f, 0.4f}), *def);
         Renderer().EndSceneRT();
 
-        // Show RTT inside ImGui Viewport panel
         m_UI.DrawViewport(Renderer(), Renderer().GetSceneRTGpuHandle(),
                           Renderer().GetSceneRTWidth(), Renderer().GetSceneRTHeight());
 
@@ -93,6 +89,7 @@ private:
     }
 
     EditorUI m_UI;
+    AIControlPanel m_AI;
     std::vector<EditorEntityInfo> m_Entities;
     Entity m_Selected;
     Material m_TexMat;
