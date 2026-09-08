@@ -7,8 +7,6 @@ using namespace Muk;
 class EditorApp : public Application {
 protected:
     void OnInit() override {
-        MUK_CORE_INFO("Muk Editor v0.3");
-
         auto* dx = dynamic_cast<DX12RHI*>(Renderer().GetRHI());
         m_UI.Initialize(Window().GetNativeHandle(), dx);
 
@@ -20,23 +18,32 @@ protected:
         CreateEditorEntity("Main Camera", true);
         CreateEditorEntity("Directional Light", false);
         CreateEditorEntity("Floor", false);
-        CreateEditorEntity("Player Start", false);
 
         if (auto tri = Assets().GetMesh("Triangle"))
             Renderer().UploadMesh("Triangle", *tri);
         if (auto cube = Assets().GetMesh("Cube"))
             Renderer().UploadMesh("Cube", *cube);
 
-        RigidBodyDesc desc;
-        desc.Type = BodyType::Dynamic;
-        desc.Shape = ShapeType::Sphere;
-        desc.Position = {0.0f, 8.0f, 0.0f};
-        desc.Radius = 0.5f;
-        desc.Restitution = 0.6f;
-        Physics().CreateBody(desc);
+        // Demo textured material using solid CPU texture uploaded to GPU
+        auto checker = Texture::CreateSolid(64, 64, 200, 180, 60);
+        // Simple checker pattern
+        for (u32 y = 0; y < 64; ++y)
+            for (u32 x = 0; x < 64; ++x) {
+                bool c = ((x / 8) + (y / 8)) & 1;
+                u32 i = (y * 64 + x) * 4;
+                checker->Pixels[i+0] = c ? 220 : 40;
+                checker->Pixels[i+1] = c ? 180 : 40;
+                checker->Pixels[i+2] = c ? 40 : 120;
+                checker->Pixels[i+3] = 255;
+            }
+        checker->Name = "Checker";
+        Renderer().UploadTexture("Checker", *checker);
+        m_TexMat = Material::CreateDefault();
+        m_TexMat.Name = "CheckerMat";
+        m_TexMat.AlbedoMap = checker;
+        m_TexMat.AlbedoTexture = "Checker";
 
-        m_UI.Log("ImGui DX12 font SRV + depth + camera MVP + mesh cache online");
-        m_UI.Log(Physics().IsUsingJolt() ? "Physics: Jolt" : "Physics: simple");
+        m_UI.Log("SceneRT viewport + GPU albedo sampling enabled");
     }
 
     void OnUpdate(float) override {}
@@ -46,24 +53,33 @@ protected:
         m_UI.DrawDockspace();
         m_UI.DrawHierarchy(m_Entities, m_Selected);
         m_UI.DrawDetails(ECS(), m_Selected);
-        m_UI.DrawViewportPlaceholder();
         m_UI.DrawContentBrowser();
         m_UI.DrawConsole();
 
-        auto mat = Assets().GetMaterial("Default");
-        if (mat) {
-            Renderer().DrawMesh("Triangle", Mat4::Translation({-0.7f, 0, 0}) * Mat4::Scale({0.5f, 0.5f, 0.5f}), *mat);
-            Renderer().DrawMesh("Cube", Mat4::Translation({0.8f, 0, 0}) * Mat4::Scale({0.4f, 0.4f, 0.4f}), *mat);
-        }
+        // Resize RTT to viewport panel size
+        u32 vw = m_UI.GetDesiredViewportWidth();
+        u32 vh = m_UI.GetDesiredViewportHeight();
+        Renderer().EnsureSceneRT(vw, vh);
 
-        // ImGui on top of scene into same command list
+        // Draw scene into offscreen target
+        Renderer().BeginSceneRT();
+        Renderer().DrawMesh("Triangle",
+            Mat4::Translation({-0.8f, 0, 0}) * Mat4::Scale({0.5f, 0.5f, 0.5f}), m_TexMat);
+        auto def = Assets().GetMaterial("Default");
+        if (def)
+            Renderer().DrawMesh("Cube",
+                Mat4::Translation({0.9f, 0, 0}) * Mat4::Scale({0.4f, 0.4f, 0.4f}), *def);
+        Renderer().EndSceneRT();
+
+        // Show RTT inside ImGui Viewport panel
+        m_UI.DrawViewport(Renderer(), Renderer().GetSceneRTGpuHandle(),
+                          Renderer().GetSceneRTWidth(), Renderer().GetSceneRTHeight());
+
         m_UI.RenderDrawData();
         m_UI.EndFrame();
     }
 
-    void OnShutdown() override {
-        m_UI.Shutdown();
-    }
+    void OnShutdown() override { m_UI.Shutdown(); }
 
 private:
     void CreateEditorEntity(const std::string& name, bool withCamera) {
@@ -79,6 +95,7 @@ private:
     EditorUI m_UI;
     std::vector<EditorEntityInfo> m_Entities;
     Entity m_Selected;
+    Material m_TexMat;
 };
 
 int main() {
