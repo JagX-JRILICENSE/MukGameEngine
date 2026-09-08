@@ -9,6 +9,8 @@ set(ENGINE_SOURCES
     RHI/RHI.cpp
     RHI/DX12/DX12RHI.cpp
     RHI/DX12/DX12Pipeline.cpp
+    RHI/DX12/DX12Texture.cpp
+    RHI/DX12/DX12SceneRT.cpp
     Renderer/Renderer.cpp
     Renderer/Mesh.cpp
     Input/Input.cpp
@@ -32,9 +34,12 @@ set(ENGINE_HEADERS
     RHI/RHI.h
     RHI/DX12/DX12RHI.h
     RHI/DX12/DX12Pipeline.h
+    RHI/DX12/DX12Texture.h
+    RHI/DX12/DX12SceneRT.h
     Renderer/Renderer.h
     Renderer/Mesh.h
     Renderer/Material.h
+    Renderer/Texture.h
     Input/Input.h
     Physics/PhysicsWorld.h
     Asset/AssetManager.h
