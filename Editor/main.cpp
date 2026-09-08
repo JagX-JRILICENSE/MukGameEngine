@@ -5,6 +5,7 @@
 #include "Editor/PlayInEditor.h"
 #include "AI/AIControlPanel.h"
 #include "AI/AIGameAgent.h"
+#include "AI/UserSettings.h"
 #include "Asset/ContentBrowser.h"
 #include "Scene/SceneSerializer.h"
 #include "Reflection/Reflection.h"
@@ -30,15 +31,10 @@ protected:
         auto* dx = dynamic_cast<DX12RHI*>(Renderer().GetRHI());
         m_UI.Initialize(Window().GetNativeHandle(), dx);
         m_AI.Initialize();
-        m_Agent.SetClient(const_cast<AIClient*>(&m_AIClientProxy()));
-        // Use settings from AI panel path: re-bind after panel init
-        m_AgentClient.SetSettings(UserSettings{});
-        {
-            UserSettings s;
-            s.Load();
-            m_AgentClient.SetSettings(s);
-            m_Agent.SetClient(&m_AgentClient);
-        }
+
+        UserSettings s;
+        s.Load();
+        m_Agent.SetSettings(s);
 
         m_Audio.Initialize();
         m_Anim.EnsureDemoAssets();
@@ -132,11 +128,8 @@ protected:
         m_CheckerMat.AlbedoMap = checker;
         m_CheckerMat.AlbedoTexture = "Checker";
 
-        m_UI.Log("v0.7: cascades, AI builder, content browser, reflection, audio, scenes");
+        m_UI.Log("v0.8 multi-agent AI + Muk Script gameplay");
     }
-
-    // helper to satisfy early SetClient - unused
-    const AIClient& m_AIClientProxy() { return m_AgentClient; }
 
     void OnUpdate(float dt) override {
 #ifdef MUK_PLATFORM_WINDOWS
@@ -155,16 +148,20 @@ protected:
         zWas = zDown; yWas = yDown; pWas = pDown; sWas = sDown;
 #endif
 
-        // Sync AI agent keys from disk occasionally
         static float keyTimer = 0;
         keyTimer += dt;
         if (keyTimer > 2.0f) {
             keyTimer = 0;
             UserSettings s; s.Load();
-            m_AgentClient.SetSettings(s);
+            m_Agent.SetSettings(s);
         }
 
         m_Agent.Tick(ECS(), Renderer(), &m_Audio, m_Entities, m_Selected);
+
+        // Continuous script play when runtime is playing (manual run)
+        if (m_Agent.Runtime().IsPlaying() && m_Agent.GetPhase() == AgentPhase::Done) {
+            m_Agent.Runtime().Update(dt);
+        }
 
         m_Audio.SetListener({ Renderer().GetCamera().Eye, {0,0,1}, {0,1,0} });
         m_Audio.Update(dt);
@@ -178,11 +175,14 @@ protected:
         if ((GetAsyncKeyState(VK_SPACE) & 0x8000) && m_PIE.IsPlaying())
             m_Character.Jump(6.0f);
 #endif
-        m_Character.SetMoveInput(wish, 5.0f);
-        m_Character.Update(Physics(), dt);
-        if (m_PlayerEntity.IsValid())
-            if (auto* t = ECS().GetComponent<Transform>(m_PlayerEntity))
-                t->Position = m_Character.GetPosition();
+        // Prefer script-driven Player when AI runtime is playing
+        if (!m_Agent.Runtime().IsPlaying()) {
+            m_Character.SetMoveInput(wish, 5.0f);
+            m_Character.Update(Physics(), dt);
+            if (m_PlayerEntity.IsValid())
+                if (auto* t = ECS().GetComponent<Transform>(m_PlayerEntity))
+                    t->Position = m_Character.GetPosition();
+        }
     }
 
     void OnRender() override {
@@ -266,7 +266,7 @@ private:
             m_Entities.clear();
             SceneSerializer::LoadWorld(ECS(), "Assets/Scenes/scene.json", &m_Entities);
         }
-        ImGui::Text("v0.7 · AI Builder · Ctrl+S save");
+        ImGui::Text("v0.8 multi-agent · Muk Script");
         ImGui::End();
 #endif
     }
@@ -285,13 +285,10 @@ private:
             ImGui::SameLine();
             if (ImGui::RadioButton("Scale", m_Gizmo.GetOperation() == GizmoOp::Scale))
                 m_Gizmo.SetOperation(GizmoOp::Scale);
-        } else if (m_PIE.IsPlaying()) {
-            ImGui::TextDisabled("Details locked during Play");
         }
         ImGui::Separator();
-        ImGui::Text("Grounded: %s", m_Character.IsGrounded() ? "yes" : "no");
-        ImGui::Text("Audio: %s", m_Audio.IsReady() ? "on" : "off");
-        ImGui::Text("Shadows: per-pixel cascades");
+        ImGui::Text("Script playing: %s", m_Agent.Runtime().IsPlaying() ? "yes" : "no");
+        ImGui::Text("Dual AI: %s", m_Agent.Team().HasDualProviders() ? "yes" : "no");
         ImGui::End();
 #else
         m_UI.DrawDetails(ECS(), m_Selected);
@@ -333,7 +330,6 @@ private:
 
     EditorUI m_UI;
     AIControlPanel m_AI;
-    AIClient m_AgentClient;
     AIGameAgent m_Agent;
     ContentBrowser m_Content;
     AudioSystem m_Audio;
