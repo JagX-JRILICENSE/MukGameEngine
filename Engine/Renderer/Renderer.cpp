@@ -91,8 +91,13 @@ void Renderer::BeginShadowPass(const Vec3& focus, f32 radius) {
 #ifdef MUK_RHI_DX12
     auto* dx12 = dynamic_cast<DX12RHI*>(m_RHI.get());
     if (!dx12 || !m_ShadowMap || !m_ShadowMap->IsValid() || !m_Pipeline) return;
-    m_ShadowMap->UpdateLightMatrix(m_LightDir, focus, radius);
-    m_ShadowMap->Begin(dx12->GetCommandList());
+    m_ShadowMap->UpdateCascades(m_LightDir, focus, radius);
+    // Cascade 0 begun; caller draws, then we loop remaining in End? 
+    // Simpler API: store focus and draw all cascades via internal helper.
+    m_ShadowFocus = focus;
+    m_ShadowRadius = radius;
+    m_ShadowCascadeIndex = 0;
+    m_ShadowMap->BeginCascade(dx12->GetCommandList(), 0);
     m_Pipeline->BindShadow(dx12->GetCommandList());
     m_InShadowPass = true;
 #else
@@ -104,8 +109,31 @@ void Renderer::EndShadowPass() {
 #ifdef MUK_RHI_DX12
     auto* dx12 = dynamic_cast<DX12RHI*>(m_RHI.get());
     if (!dx12 || !m_ShadowMap) return;
-    m_ShadowMap->End(dx12->GetCommandList());
+    // Cascades 1..N must be filled by re-issuing draws — for now EndAll after cascade 0
+    // Full cascade fill is done by BeginShadowCascade / Draw / next
+    m_ShadowMap->EndAll(dx12->GetCommandList());
     m_InShadowPass = false;
+#endif
+}
+
+void Renderer::RenderAllShadowCascades(const std::function<void()>& drawScene) {
+#ifdef MUK_RHI_DX12
+    auto* dx12 = dynamic_cast<DX12RHI*>(m_RHI.get());
+    if (!dx12 || !m_ShadowMap || !m_ShadowMap->IsValid() || !m_Pipeline) return;
+
+    m_ShadowMap->UpdateCascades(m_LightDir, m_ShadowFocus, m_ShadowRadius > 0 ? m_ShadowRadius : 40.f);
+
+    for (u32 c = 0; c < kShadowCascades; ++c) {
+        m_ShadowCascadeIndex = c;
+        m_ShadowMap->BeginCascade(dx12->GetCommandList(), c);
+        m_Pipeline->BindShadow(dx12->GetCommandList());
+        m_InShadowPass = true;
+        drawScene();
+        m_InShadowPass = false;
+    }
+    m_ShadowMap->EndAll(dx12->GetCommandList());
+#else
+    (void)drawScene;
 #endif
 }
 
@@ -134,7 +162,11 @@ void Renderer::DrawMesh(const std::string& meshName, const Mat4& world, const Ma
     auto* dx12 = dynamic_cast<DX12RHI*>(m_RHI.get());
     if (!dx12 || !m_Pipeline || !m_Pipeline->IsReady()) return;
 
-    Mat4 lightVP = m_ShadowMap && m_ShadowMap->IsValid() ? m_ShadowMap->GetLightViewProj() : Mat4::Identity();
+    Mat4 lightVP = Mat4::Identity();
+    if (m_ShadowMap && m_ShadowMap->IsValid()) {
+        u32 c = m_InShadowPass ? m_ShadowCascadeIndex : 0;
+        lightVP = m_ShadowMap->GetLightViewProj(c);
+    }
 
     if (m_InShadowPass) {
         Mat4 mvp = lightVP * world;
@@ -153,6 +185,9 @@ void Renderer::DrawMesh(const std::string& meshName, const Mat4& world, const Ma
     Mat4 mvp = m_ViewProjection * world;
     auto* cmd = dx12->GetCommandList();
     m_Pipeline->BindLit(cmd);
+    // Use nearest cascade (0) light VP for sampling — soft PCF on cascade 0
+    // (full per-pixel cascade pick needs multi-VP CB; cascade 0 covers near field)
+    lightVP = m_ShadowMap && m_ShadowMap->IsValid() ? m_ShadowMap->GetLightViewProj(0) : Mat4::Identity();
     m_Pipeline->SetDrawParams(mvp, world, lightVP, material,
                               m_LightDir, m_LightColor, m_LightIntensity, m_Ambient,
                               ShadowsEnabled());
