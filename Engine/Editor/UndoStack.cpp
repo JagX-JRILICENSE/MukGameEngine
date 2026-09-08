@@ -1,7 +1,7 @@
 #include "UndoStack.h"
 #include "ECS/World.h"
 #include "Core/Log.h"
-#include <cstring>
+#include <cmath>
 
 namespace Muk {
 
