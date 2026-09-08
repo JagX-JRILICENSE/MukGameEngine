@@ -2,6 +2,7 @@ set(ENGINE_SOURCES
     Core/Application.cpp
     Core/Log.cpp
     Core/Window.cpp
+    Core/Profiler.cpp
     Math/Vector.cpp
     Math/Matrix.cpp
     ECS/World.cpp
@@ -21,6 +22,7 @@ set(ENGINE_SOURCES
     AI/UserSettings.cpp
     AI/AIClient.cpp
     AI/AIControlPanel.cpp
+    Scene/SceneRenderer.cpp
 )
 
 set(ENGINE_HEADERS
@@ -28,6 +30,7 @@ set(ENGINE_HEADERS
     Core/Log.h
     Core/Window.h
     Core/Core.h
+    Core/Profiler.h
     Math/Vector.h
     Math/Matrix.h
     Math/Math.h
@@ -51,6 +54,7 @@ set(ENGINE_HEADERS
     AI/UserSettings.h
     AI/AIClient.h
     AI/AIControlPanel.h
+    Scene/SceneRenderer.h
     Engine.h
 )
 
