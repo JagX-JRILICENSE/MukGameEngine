@@ -9,6 +9,8 @@
 
 namespace Muk {
 
+class DX12Pipeline; // forward
+
 class Renderer {
 public:
     Renderer() = default;
@@ -21,14 +23,17 @@ public:
     void EndFrame();
     void OnResize(u32 width, u32 height);
 
-    // Simple draw submission (will expand to proper render graph later)
+    // Upload mesh once, then draw each frame with transform
+    bool UploadMesh(const Mesh& mesh);
     void DrawMesh(const Mesh& mesh, const Mat4& transform, const Material& material);
 
     RHI* GetRHI() const { return m_RHI.get(); }
 
 private:
     std::unique_ptr<RHI> m_RHI;
+    std::unique_ptr<DX12Pipeline> m_Pipeline;
     bool m_Initialized = false;
+    bool m_MeshUploaded = false;
 };
 
 } // namespace Muk
