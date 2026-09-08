@@ -1,5 +1,6 @@
 #include "Application.h"
 #include "Log.h"
+#include "Profiler.h"
 
 namespace Muk {
 
@@ -38,27 +39,32 @@ Application::~Application() {
 
 void Application::Run() {
     OnInit();
-
     MUK_CORE_INFO("Muk Game Engine started");
 
     while (m_Running && !m_Window.ShouldClose()) {
-        m_Window.PollEvents();
+        Profiler::Get().BeginFrame();
 
-        // Fixed timestep for now (can switch to high-resolution timer later)
+        m_Window.PollEvents();
         float deltaTime = 1.0f / 60.0f;
 
-        // Physics step
-        m_Physics.Update(deltaTime);
+        {
+            MUK_PROFILE_SCOPE("Physics");
+            m_Physics.Update(deltaTime);
+        }
+        {
+            MUK_PROFILE_SCOPE("Update");
+            OnUpdate(deltaTime);
+        }
 
-        // Game logic
-        OnUpdate(deltaTime);
-
-        // Rendering
         m_Renderer.BeginFrame();
-        OnRender();
+        {
+            MUK_PROFILE_SCOPE("Render");
+            OnRender();
+        }
         m_Renderer.EndFrame();
-
         m_Window.SwapBuffers();
+
+        Profiler::Get().EndFrame();
     }
 
     OnShutdown();
