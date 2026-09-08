@@ -29,15 +29,23 @@ public:
     DXGI_FORMAT GetBackBufferFormat() const { return m_BackBufferFormat; }
     DXGI_FORMAT GetDepthFormat() const { return m_DepthFormat; }
 
-    // ImGui font / texture SRV heap (shader-visible)
     ID3D12DescriptorHeap* GetImGuiSrvHeap() const { return m_ImGuiSrvHeap.Get(); }
+    u32 GetSrvDescriptorSize() const { return m_SrvDescriptorSize; }
+    u32* GetSrvBumpIndex() { return &m_ImGuiSrvNext; }
+    u32 GetSrvMaxCount() const { return ImGuiSrvCount; }
+
     D3D12_CPU_DESCRIPTOR_HANDLE AllocImGuiSrv(D3D12_GPU_DESCRIPTOR_HANDLE* outGpu = nullptr);
-    void FreeImGuiSrv(D3D12_CPU_DESCRIPTOR_HANDLE cpu); // simple bump allocator - no free for now
+    void FreeImGuiSrv(D3D12_CPU_DESCRIPTOR_HANDLE cpu);
+
+    // Restore main backbuffer as OM target (after SceneRT)
+    void BindSwapchainTargets();
 
     u32 GetWidth() const { return m_Width; }
     u32 GetHeight() const { return m_Height; }
     u32 GetFrameIndex() const { return m_FrameIndex; }
     static constexpr u32 GetFrameCount() { return FrameCount; }
+
+    void WaitForGPUPublic() { WaitForGPU(); }
 
 private:
     bool CreateDevice();
@@ -50,7 +58,7 @@ private:
     void MoveToNextFrame();
 
     static constexpr u32 FrameCount = 2;
-    static constexpr u32 ImGuiSrvCount = 64;
+    static constexpr u32 ImGuiSrvCount = 128; // fonts + albedo + viewport RT
 
     ComPtr<ID3D12Device> m_Device;
     ComPtr<IDXGIFactory4> m_Factory;
@@ -71,7 +79,7 @@ private:
     u32 m_RTVDescriptorSize = 0;
     u32 m_DSVDescriptorSize = 0;
     u32 m_SrvDescriptorSize = 0;
-    u32 m_ImGuiSrvNext = 1; // 0 reserved for font
+    u32 m_ImGuiSrvNext = 1;
 
     u32 m_Width = 0;
     u32 m_Height = 0;
