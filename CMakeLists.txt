@@ -5,7 +5,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Multi-config generators (VS): put all exes in build/bin/<Config>
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin/Debug)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin/Release)
@@ -75,8 +74,7 @@ if(MUK_USE_TINYGLTF)
     if(NOT tinygltf_POPULATED)
         FetchContent_Populate(tinygltf)
     endif()
-    # tinygltf is header-only; avoid adding its CMake targets if they conflict
-    add_compile_definitions(MUK_USE_TINYGLTF TINYGLTF_IMPLEMENTATION)
+    add_compile_definitions(MUK_USE_TINYGLTF)
     message(STATUS "tinygltf: enabled")
 endif()
 
