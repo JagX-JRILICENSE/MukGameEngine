@@ -6,7 +6,6 @@
 #include "ECS/Component.h"
 #include <string>
 #include <vector>
-#include <functional>
 
 namespace Muk {
 
@@ -16,24 +15,16 @@ struct EditorEntityInfo {
     bool Selected = false;
 };
 
-/**
- * Editor UI layer.
- * When MUK_USE_IMGUI is defined and Dear ImGui is linked, draws real docking panels.
- * Otherwise falls back to console logging of panel state.
- *
- * Panels:
- *  - Viewport
- *  - Hierarchy (entity list)
- *  - Details (inspector for selected entity)
- *  - Content Browser
- *  - Console
- */
+class DX12RHI;
+
 class EditorUI {
 public:
-    void Initialize(void* hwnd, void* d3d12Device, void* d3d12CommandQueue);
+    void Initialize(void* hwnd, DX12RHI* rhi);
     void Shutdown();
 
     void BeginFrame();
+    // Call after scene draws, before RHI EndFrame - records ImGui into cmd list
+    void RenderDrawData();
     void EndFrame();
 
     void DrawDockspace();
@@ -51,8 +42,10 @@ public:
 
 private:
     bool m_Initialized = false;
+    bool m_ImGuiDx12 = false;
     bool m_WantsCaptureMouse = false;
     bool m_WantsCaptureKeyboard = false;
+    DX12RHI* m_RHI = nullptr;
     std::vector<std::string> m_ConsoleLines;
     static constexpr size_t MaxConsoleLines = 200;
 };
