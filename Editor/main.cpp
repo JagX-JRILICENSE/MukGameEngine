@@ -1,54 +1,32 @@
 #include "Engine.h"
-#include <iostream>
-#include <string>
-#include <vector>
+#include "EditorUI/EditorUI.h"
+#include "RHI/DX12/DX12RHI.h"
 
 using namespace Muk;
-
-/**
- * Muk Editor
- *
- * Current status: Functional engine host with placeholder UI panels.
- * Next: Integrate Dear ImGui for real docking panels (Viewport, Hierarchy, Details, Content Browser).
- *
- * Planned layout (Unreal-style):
- * ┌─────────────────────────────────────────────────────────────┐
- * │  Menu Bar                                                   │
- * ├──────────────┬──────────────────────────────┬───────────────┤
- * │  Hierarchy   │         Viewport             │   Details     │
- * │  (entities)  │     (3D scene view)          │  (inspector)  │
- * ├──────────────┴──────────────────────────────┴───────────────┤
- * │  Content Browser / Console                                  │
- * └─────────────────────────────────────────────────────────────┘
- */
-
-struct EditorEntity {
-    Entity Handle;
-    std::string Name;
-};
 
 class EditorApp : public Application {
 protected:
     void OnInit() override {
-        MUK_CORE_INFO("========================================");
-        MUK_CORE_INFO("       Muk Editor v0.1 (Foundation)    ");
-        MUK_CORE_INFO("========================================");
-        MUK_CORE_INFO("Panels planned:");
-        MUK_CORE_INFO("  - Viewport (3D scene rendering)");
-        MUK_CORE_INFO("  - Hierarchy (entity tree)");
-        MUK_CORE_INFO("  - Details (component inspector)");
-        MUK_CORE_INFO("  - Content Browser");
-        MUK_CORE_INFO("  - Console / Output Log");
-        MUK_CORE_INFO("  - Visual Scripting (future)");
-        MUK_CORE_INFO("========================================");
+        MUK_CORE_INFO("Muk Editor v0.2");
 
-        // Seed a few example entities for the hierarchy
-        CreateEditorEntity("Main Camera");
-        CreateEditorEntity("Directional Light");
-        CreateEditorEntity("Floor");
-        CreateEditorEntity("Player Start");
+        void* device = nullptr;
+        void* queue = nullptr;
+#ifdef MUK_RHI_DX12
+        if (auto* dx = dynamic_cast<DX12RHI*>(Renderer().GetRHI())) {
+            device = dx->GetDevice();
+            queue = dx->GetCommandQueue();
+        }
+#endif
+        m_UI.Initialize(Window().GetNativeHandle(), device, queue);
 
-        // Also create a physics test body
+        CreateEditorEntity("Main Camera", true);
+        CreateEditorEntity("Directional Light", false);
+        CreateEditorEntity("Floor", false);
+        CreateEditorEntity("Player Start", false);
+
+        auto mesh = Assets().GetMesh("Triangle");
+        if (mesh) Renderer().UploadMesh(*mesh);
+
         RigidBodyDesc desc;
         desc.Type = BodyType::Dynamic;
         desc.Shape = ShapeType::Sphere;
@@ -56,43 +34,57 @@ protected:
         desc.Radius = 0.5f;
         desc.Restitution = 0.6f;
         Physics().CreateBody(desc);
+
+        m_UI.Log("Editor ready. Hierarchy / Details / Viewport / Content / Console panels active.");
+        if (Physics().IsUsingJolt())
+            m_UI.Log("Physics backend: Jolt");
+        else
+            m_UI.Log("Physics backend: simple solver");
     }
 
     void OnUpdate(float deltaTime) override {
-        // Future: handle editor camera, gizmo interaction, selection, etc.
-        m_FrameCount++;
-        if (m_FrameCount % 120 == 0) {
-            // Occasional status
-            MUK_CORE_TRACE("Editor running... entities: {0}", (int)m_Entities.size());
-        }
+        (void)deltaTime;
     }
 
     void OnRender() override {
-        // Viewport clear is handled by DX12RHI
-        // Future: render selected camera view into an ImGui image
-        auto mesh = Assets().GetMesh("Cube");
+        m_UI.BeginFrame();
+        m_UI.DrawDockspace();
+        m_UI.DrawHierarchy(m_Entities, m_Selected);
+        m_UI.DrawDetails(ECS(), m_Selected);
+        m_UI.DrawViewportPlaceholder();
+        m_UI.DrawContentBrowser();
+        m_UI.DrawConsole();
+
+        // Scene draw (main swapchain)
+        auto mesh = Assets().GetMesh("Triangle");
         auto mat = Assets().GetMaterial("Default");
         if (mesh && mat) {
-            Renderer().DrawMesh(*mesh, Mat4::Identity(), *mat);
+            Renderer().DrawMesh(*mesh, Mat4::Scale({0.7f, 0.7f, 0.7f}), *mat);
         }
+
+        m_UI.EndFrame();
     }
 
     void OnShutdown() override {
+        m_UI.Shutdown();
         MUK_CORE_INFO("Muk Editor closed");
     }
 
 private:
-    void CreateEditorEntity(const std::string& name) {
-        EditorEntity e;
+    void CreateEditorEntity(const std::string& name, bool withCamera) {
+        EditorEntityInfo e;
         e.Handle = ECS().CreateEntity();
         e.Name = name;
         ECS().AddComponent<Transform>(e.Handle);
+        if (withCamera)
+            ECS().AddComponent<Camera>(e.Handle);
         m_Entities.push_back(e);
-        MUK_CORE_INFO("Editor: Created entity '{0}'", name.c_str());
+        m_UI.Log("Created entity: " + name);
     }
 
-    std::vector<EditorEntity> m_Entities;
-    u32 m_FrameCount = 0;
+    EditorUI m_UI;
+    std::vector<EditorEntityInfo> m_Entities;
+    Entity m_Selected;
 };
 
 int main() {
