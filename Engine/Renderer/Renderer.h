@@ -39,20 +39,21 @@ public:
     bool UploadMesh(const std::string& name, const Mesh& mesh);
     bool UploadTexture(const std::string& name, const Texture& texture);
     void SetCamera(const CameraView& camera);
+    void SetDirectionalLight(const Vec3& dir, const Vec3& color, f32 intensity, f32 ambient);
 
     void DrawMesh(const std::string& meshName, const Mat4& world, const Material& material);
     void DrawMesh(const Mesh& mesh, const Mat4& transform, const Material& material);
 
-    // Editor viewport RTT
     bool EnsureSceneRT(u32 width, u32 height);
     void BeginSceneRT();
     void EndSceneRT();
-    void* GetSceneRTGpuHandle() const; // D3D12_GPU_DESCRIPTOR_HANDLE as void* for ImGui
+    void* GetSceneRTGpuHandle() const;
     u32 GetSceneRTWidth() const;
     u32 GetSceneRTHeight() const;
 
     RHI* GetRHI() const { return m_RHI.get(); }
     Mat4 GetViewProjection() const { return m_ViewProjection; }
+    const CameraView& GetCamera() const { return m_Camera; }
 
 private:
     void RebuildViewProjection();
@@ -62,6 +63,12 @@ private:
     std::unique_ptr<DX12SceneRT> m_SceneRT;
     CameraView m_Camera;
     Mat4 m_ViewProjection = Mat4::Identity();
+
+    Vec3 m_LightDir{0.35f, -1.0f, 0.25f};
+    Vec3 m_LightColor{1.0f, 0.98f, 0.92f};
+    f32 m_LightIntensity = 1.2f;
+    f32 m_Ambient = 0.18f;
+
     u32 m_Width = 1;
     u32 m_Height = 1;
     bool m_Initialized = false;
