@@ -27,13 +27,14 @@ struct GPUMeshBuffers {
 struct FrameCB {
     float MVP[16];
     float World[16];
+    float LightVP[16];
     float BaseColor[4];
-    float LightDir[4];      // xyz + intensity
-    float LightColor[4];    // rgb + ambient
+    float LightDir[4];
+    float LightColor[4];
     float UseTexture;
     float Metallic;
     float Roughness;
-    float Pad;
+    float ReceiveShadows; // 1 = sample shadow map
 };
 
 class DX12Pipeline {
@@ -46,9 +47,14 @@ public:
     bool UploadTexture(ID3D12Device* device, const std::string& name, const Texture& tex);
     bool HasMesh(const std::string& name) const;
 
-    void Bind(ID3D12GraphicsCommandList* cmdList);
-    void SetDrawParams(const Mat4& mvp, const Mat4& world, const Material& material,
-                       const Vec3& lightDir, const Vec3& lightColor, f32 intensity, f32 ambient);
+    void BindLit(ID3D12GraphicsCommandList* cmdList);
+    void BindShadow(ID3D12GraphicsCommandList* cmdList);
+
+    void SetDrawParams(const Mat4& mvp, const Mat4& world, const Mat4& lightVP,
+                       const Material& material,
+                       const Vec3& lightDir, const Vec3& lightColor, f32 intensity, f32 ambient,
+                       bool receiveShadows);
+
     void DrawMesh(ID3D12GraphicsCommandList* cmdList, const std::string& name);
 
     bool IsReady() const { return m_Ready; }
@@ -56,11 +62,13 @@ public:
 
 private:
     bool CreateRootSignature(ID3D12Device* device);
-    bool CreatePipelineState(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_FORMAT depthFormat);
-    bool CompileShader(const char* entry, const char* target, ComPtr<ID3DBlob>& outBlob);
+    bool CreateLitPSO(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_FORMAT depthFormat);
+    bool CreateShadowPSO(ID3D12Device* device);
+    bool CompileShader(const char* source, const char* entry, const char* target, ComPtr<ID3DBlob>& outBlob);
 
     ComPtr<ID3D12RootSignature> m_RootSignature;
-    ComPtr<ID3D12PipelineState> m_PipelineState;
+    ComPtr<ID3D12PipelineState> m_LitPSO;
+    ComPtr<ID3D12PipelineState> m_ShadowPSO;
     ComPtr<ID3D12Resource> m_ConstantBuffer;
     void* m_CBMapped = nullptr;
 
