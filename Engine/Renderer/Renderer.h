@@ -2,6 +2,9 @@
 
 #include "Core/Core.h"
 #include "RHI/RHI.h"
+#include "Mesh.h"
+#include "Material.h"
+#include "Math/Matrix.h"
 #include <memory>
 
 namespace Muk {
@@ -18,7 +21,10 @@ public:
     void EndFrame();
     void OnResize(u32 width, u32 height);
 
-    // Future: Submit meshes, draw calls, etc.
+    // Simple draw submission (will expand to proper render graph later)
+    void DrawMesh(const Mesh& mesh, const Mat4& transform, const Material& material);
+
+    RHI* GetRHI() const { return m_RHI.get(); }
 
 private:
     std::unique_ptr<RHI> m_RHI;
