@@ -1,18 +1,21 @@
 # Muk Roadmap
 
-## Done (v0.8)
+## Done (v0.9)
 
-- Multi-agent team: Architect / Builder / Scripter / Critic
-- Dual provider: OpenRouter + NVIDIA collaboration
-- Muk Script VM: on_start, on_update, if/then, move, levels, UI, win/lose
-- Multi-level GameRuntime + load_level
-- Full pipeline: design → scene → script → UI → preview → verify → fix → playtest
-- Prior: cascades, animation, audio, content browser, scenes, reflection, IBL
+- CI cmake fix (CMP0169, flexible generator, samples off by default)
+- Distance proximity triggers for pickups
+- Async AI worker thread
+- Autosave scripts under Assets/Scripts
+- Input action mapping
+- Prefab registry
+- Screenshot TGA capture (F12)
+- Script hot-reload (F9)
+- App name + VERSIONINFO branding
 
-## Next polish
+## Next
 
-1. Trigger volumes (orb collect distance checks in VM)
-2. Async AI calls (non-blocking Tick)
-3. Save generated scripts/levels to Assets/
-4. GPU skinning
-5. Bloom + cubemap IBL
+1. GPU readback screenshots from SceneRT
+2. Custom .ico embedded in exe
+3. Wire AIGameAgent fully to AsyncAI for every phase
+4. Nav / AI pathfinding
+5. Particle system
