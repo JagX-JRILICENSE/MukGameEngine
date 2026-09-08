@@ -1,11 +1,15 @@
 cmake_minimum_required(VERSION 3.25)
-project(MukGameEngine VERSION 0.5.0 LANGUAGES CXX)
+project(MukGameEngine VERSION 0.6.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Multi-config generators (VS): put all exes in build/bin/<Config>
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin/Debug)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin/Release)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/bin/RelWithDebInfo)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
@@ -26,7 +30,6 @@ if(WIN32)
     endif()
 endif()
 
-# ---- Dear ImGui ----
 if(MUK_USE_IMGUI)
     FetchContent_Declare(imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -38,13 +41,15 @@ if(MUK_USE_IMGUI)
         GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo.git
         GIT_TAG master
     )
-    FetchContent_MakeAvailable(imguizmo)
+    FetchContent_GetProperties(imguizmo)
+    if(NOT imguizmo_POPULATED)
+        FetchContent_Populate(imguizmo)
+    endif()
 
     add_compile_definitions(MUK_USE_IMGUI)
     message(STATUS "ImGui (docking) + ImGuizmo: enabled")
 endif()
 
-# ---- Jolt Physics ----
 if(MUK_USE_JOLT)
     FetchContent_Declare(JoltPhysics
         GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
@@ -61,14 +66,17 @@ if(MUK_USE_JOLT)
     message(STATUS "Jolt Physics: enabled")
 endif()
 
-# ---- tinygltf ----
 if(MUK_USE_TINYGLTF)
     FetchContent_Declare(tinygltf
         GIT_REPOSITORY https://github.com/syoyo/tinygltf.git
         GIT_TAG v2.9.3
     )
-    FetchContent_MakeAvailable(tinygltf)
-    add_compile_definitions(MUK_USE_TINYGLTF)
+    FetchContent_GetProperties(tinygltf)
+    if(NOT tinygltf_POPULATED)
+        FetchContent_Populate(tinygltf)
+    endif()
+    # tinygltf is header-only; avoid adding its CMake targets if they conflict
+    add_compile_definitions(MUK_USE_TINYGLTF TINYGLTF_IMPLEMENTATION)
     message(STATUS "tinygltf: enabled")
 endif()
 
