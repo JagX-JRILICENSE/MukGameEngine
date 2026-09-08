@@ -9,13 +9,9 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
-#include <Jolt/Physics/Collision/ObjectLayer.h>
 #endif
 
 namespace Muk {
-
-// Access Jolt system from PhysicsWorld (friend-like via public IsUsingJolt + internal helper)
-// We store a raw pointer to PhysicsSystem when using Jolt — obtained at Create time.
 
 struct CharacterController::Impl {
 #ifdef MUK_USE_JOLT
@@ -24,14 +20,6 @@ struct CharacterController::Impl {
     JPH::TempAllocatorImpl* Temp = nullptr;
 #endif
 };
-
-// Exposed for CharacterController — declared in PhysicsWorld.cpp linkage
-namespace PhysicsAccess {
-#ifdef MUK_USE_JOLT
-    extern JPH::PhysicsSystem* GetJoltSystem(PhysicsWorld& w);
-    extern JPH::TempAllocatorImpl* GetJoltTemp(PhysicsWorld& w);
-#endif
-}
 
 CharacterController::CharacterController() : m_Impl(std::make_unique<Impl>()) {}
 CharacterController::~CharacterController() = default;
@@ -44,8 +32,8 @@ bool CharacterController::Create(PhysicsWorld& world, const CharacterDesc& desc)
 
 #ifdef MUK_USE_JOLT
     if (world.IsUsingJolt()) {
-        JPH::PhysicsSystem* sys = PhysicsAccess::GetJoltSystem(world);
-        JPH::TempAllocatorImpl* temp = PhysicsAccess::GetJoltTemp(world);
+        auto* sys = static_cast<JPH::PhysicsSystem*>(world.GetJoltSystemPtr());
+        auto* temp = static_cast<JPH::TempAllocatorImpl*>(world.GetJoltTempAllocatorPtr());
         if (!sys || !temp) {
             MUK_CORE_ERROR("CharacterController: no Jolt system");
             return false;
@@ -73,9 +61,10 @@ bool CharacterController::Create(PhysicsWorld& world, const CharacterDesc& desc)
         MUK_CORE_INFO("CharacterController: Jolt CharacterVirtual ready");
         return true;
     }
+#else
+    (void)world;
 #endif
 
-    // Simple kinematic fallback
     m_Valid = true;
     MUK_CORE_INFO("CharacterController: simple kinematic mode");
     return true;
@@ -115,7 +104,6 @@ void CharacterController::Update(PhysicsWorld& world, f32 dt) {
         JPH::Vec3 wish = JPH::Vec3(m_WishDir.x, 0, m_WishDir.z) * m_Speed;
 
         JPH::CharacterVirtual::ExtendedUpdateSettings upd;
-        // Stick to floor / step
         upd.mStickToFloorStepDown = JPH::Vec3(0, -0.5f, 0);
         upd.mWalkStairsStepUp = JPH::Vec3(0, 0.4f, 0);
 
@@ -128,7 +116,6 @@ void CharacterController::Update(PhysicsWorld& world, f32 dt) {
             m_JumpImpulse = 0.0f;
         }
 
-        // Gravity
         Vec3 g = world.GetGravity();
         if (!m_Impl->Character->IsSupported())
             velocity += JPH::Vec3(g.x, g.y, g.z) * dt;
@@ -139,7 +126,7 @@ void CharacterController::Update(PhysicsWorld& world, f32 dt) {
             dt,
             m_Impl->System->GetGravity(),
             upd,
-            m_Impl->System->GetDefaultBroadPhaseLayerFilter(1 /* MOVING */),
+            m_Impl->System->GetDefaultBroadPhaseLayerFilter(1),
             m_Impl->System->GetDefaultLayerFilter(1),
             {},
             {},
@@ -155,7 +142,6 @@ void CharacterController::Update(PhysicsWorld& world, f32 dt) {
     }
 #endif
 
-    // Simple fallback: gravity + ground plane at y=0
     m_Velocity.x = m_WishDir.x * m_Speed;
     m_Velocity.z = m_WishDir.z * m_Speed;
     Vec3 g = world.GetGravity();
