@@ -11,7 +11,6 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             PostQuitMessage(0);
             return 0;
         case WM_SIZE:
-            // Handle resize later
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -39,9 +38,13 @@ bool Window::Create(const WindowProps& props) {
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    wc.hIconSm = LoadIcon(nullptr, IDI_APPLICATION);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszClassName = L"MukWindowClass";
 
+    // Re-register if needed
+    UnregisterClass(L"MukWindowClass", hInstance);
     if (!RegisterClassEx(&wc)) {
         MUK_CORE_ERROR("Failed to register window class");
         return false;
@@ -50,10 +53,13 @@ bool Window::Create(const WindowProps& props) {
     RECT rect = { 0, 0, (LONG)props.Width, (LONG)props.Height };
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
 
+    std::wstring title(props.Title.begin(), props.Title.end());
+    if (title.empty()) title = L"Muk Game Engine";
+
     HWND hwnd = CreateWindowEx(
         0,
         L"MukWindowClass",
-        std::wstring(props.Title.begin(), props.Title.end()).c_str(),
+        title.c_str(),
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT,
         rect.right - rect.left,
@@ -65,6 +71,10 @@ bool Window::Create(const WindowProps& props) {
         MUK_CORE_ERROR("Failed to create window");
         return false;
     }
+
+    // Ensure big/small icons on the window
+    SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)wc.hIcon);
+    SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)wc.hIconSm);
 
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
@@ -106,12 +116,10 @@ void Window::PollEvents() {
 }
 
 void Window::SwapBuffers() {
-    // Will be handled by RHI / DXGI swapchain later
 }
 
 void Window::SetVSync(bool enabled) {
     m_Data.VSync = enabled;
-    // Implement with DXGI later
 }
 
 } // namespace Muk
