@@ -2,6 +2,7 @@
 
 #include "AIClient.h"
 #include "MultiAgentTeam.h"
+#include "AsyncAI.h"
 #include "Script/GameplayScript.h"
 #include "ECS/World.h"
 #include "ECS/Entity.h"
@@ -13,18 +14,19 @@ namespace Muk {
 
 class Renderer;
 class AudioSystem;
+class ParticleSystem;
 struct EditorEntityInfo;
 
 enum class AgentPhase {
     Idle,
-    Architecting,   // multi-AI design doc + levels
-    BuildingScene,  // ACTION spawn/layout
-    WritingScript,  // gameplay script
-    BuildingUI,     // HUD / flow actions
+    Architecting,
+    BuildingScene,
+    WritingScript,
+    BuildingUI,
     Previewing,
     Verifying,
     Fixing,
-    Playtesting,    // run script briefly / host play
+    Playtesting,
     Done,
     Failed
 };
@@ -34,12 +36,6 @@ struct AgentLogLine {
     bool IsError = false;
 };
 
-/**
- * Full production-style AI pipeline:
- * Architect + Builder + Scripter + Critic (OpenRouter and/or NVIDIA)
- * produces levels, scene ACTIONs, Muk Script gameplay, UI flows,
- * then preview / verify / fix / playtest.
- */
 class AIGameAgent {
 public:
     void SetClient(AIClient* client);
@@ -49,10 +45,12 @@ public:
     void Cancel();
 
     void Tick(World& world, Renderer& renderer, AudioSystem* audio,
-              std::vector<EditorEntityInfo>& entities, Entity& selected);
+              std::vector<EditorEntityInfo>& entities, Entity& selected,
+              ParticleSystem* particles = nullptr);
 
     GameRuntime& Runtime() { return m_Runtime; }
     MultiAgentTeam& Team() { return m_Team; }
+    AsyncAI& Async() { return m_Async; }
 
     AgentPhase GetPhase() const { return m_Phase; }
     const std::string& GetStatus() const { return m_Status; }
@@ -62,24 +60,32 @@ public:
     }
 
     void DrawImGui();
+    bool SaveGeneratedAssets(ContentBrowser* browser = nullptr); // scripts + levels
 
-    // Apply ACTION block (used by runtime load_level too)
     void ApplyActions(World& world, Renderer& renderer, AudioSystem* audio,
                       std::vector<EditorEntityInfo>& entities, Entity& selected,
-                      const std::string& text);
+                      const std::string& text, ParticleSystem* particles = nullptr);
 
 private:
     void Log(const std::string& s, bool err = false);
     void RunLocalVerify(World& world);
     ScriptHostCallbacks MakeHost(World& world, Renderer& renderer, AudioSystem* audio,
-                                 std::vector<EditorEntityInfo>& entities, Entity& selected);
+                                 std::vector<EditorEntityInfo>& entities, Entity& selected,
+                                 ParticleSystem* particles);
+    void SubmitPhase(AgentRole role, const std::string& tag,
+                     const std::string& system, const std::string& user, float temp);
+    void HandleAsyncResults(World& world, Renderer& renderer, AudioSystem* audio,
+                            std::vector<EditorEntityInfo>& entities, Entity& selected,
+                            ParticleSystem* particles);
 
     std::string ExtractBlock(const std::string& text, const std::string& beginTag, const std::string& endTag) const;
     std::string ExtractScript(const std::string& text) const;
 
     MultiAgentTeam m_Team;
+    AsyncAI m_Async;
     GameRuntime m_Runtime;
     AgentPhase m_Phase = AgentPhase::Idle;
+    bool m_WaitingAsync = false;
     std::string m_Brief;
     std::string m_Status;
     std::string m_DesignDoc;
@@ -93,9 +99,8 @@ private:
     float m_PlayTestTimer = 0;
 
     char m_BriefEdit[2048] =
-        "Build a complete mini-game: 2 levels. Level1 arena with floor, 4 pillars, 3 orbs. "
-        "Player moves with WASD. Collect orbs (score). At score 3 load level2 boss platform and win. "
-        "Show HUD score. Include title UI.";
+        "Build a complete mini-game: arena with floor, 4 pillars, 3 orbs. "
+        "Player WASD. Collect orbs. Score 3 wins. HUD score.";
 
     bool m_UseDual = true;
 };
