@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <fstream>
+#include <filesystem>
 
 namespace Muk {
 
@@ -32,6 +34,7 @@ void GameplayScript::Clear() {
     m_Lines.clear();
     m_Vars.clear();
     m_Errors.clear();
+    m_Proximity.clear();
 }
 
 bool GameplayScript::LoadFromSource(const std::string& source) {
@@ -42,7 +45,6 @@ bool GameplayScript::LoadFromSource(const std::string& source) {
     Block cur = Block::None;
     std::string trigA, trigB;
     while (std::getline(iss, raw)) {
-        // strip comments
         auto cmt = raw.find('#');
         if (cmt != std::string::npos) raw = raw.substr(0, cmt);
         int indent = 0;
@@ -53,19 +55,22 @@ bool GameplayScript::LoadFromSource(const std::string& source) {
         std::string low = line;
         for (auto& ch : low) ch = (char)std::tolower((unsigned char)ch);
 
-        if (low == "on_start") {
-            cur = Block::OnStart; trigA.clear(); trigB.clear();
-            continue;
-        }
-        if (low.rfind("on_update", 0) == 0) {
-            cur = Block::OnUpdate; trigA.clear(); trigB.clear();
-            continue;
-        }
+        if (low == "on_start") { cur = Block::OnStart; trigA.clear(); trigB.clear(); continue; }
+        if (low.rfind("on_update", 0) == 0) { cur = Block::OnUpdate; trigA.clear(); trigB.clear(); continue; }
         if (low.rfind("on_trigger", 0) == 0) {
             auto tok = SplitWS(line);
             cur = Block::OnTrigger;
             trigA = tok.size() > 1 ? tok[1] : "";
             trigB = tok.size() > 2 ? tok[2] : "";
+            continue;
+        }
+        // proximity Player Orb1 1.5  — register distance trigger
+        if (low.rfind("proximity ", 0) == 0 || low.rfind("near ", 0) == 0) {
+            auto tok = SplitWS(line);
+            if (tok.size() >= 3) {
+                float r = tok.size() >= 4 ? std::stof(tok[3]) : 1.5f;
+                RegisterProximity(tok[1], tok[2], r);
+            }
             continue;
         }
 
@@ -77,43 +82,53 @@ bool GameplayScript::LoadFromSource(const std::string& source) {
         L.Indent = indent;
         m_Lines.push_back(L);
     }
-    MUK_CORE_INFO("GameplayScript loaded: {0} lines", (int)m_Lines.size());
+    MUK_CORE_INFO("GameplayScript loaded: {0} lines, {1} proximity",
+                  (int)m_Lines.size(), (int)m_Proximity.size());
     return true;
+}
+
+void GameplayScript::RegisterProximity(const std::string& a, const std::string& b, float radius) {
+    m_Proximity.push_back({ a, b, radius, false });
+}
+
+void GameplayScript::UpdateProximity(ScriptHostCallbacks& host) {
+    if (!host.GetPos) return;
+    for (auto& p : m_Proximity) {
+        if (p.Fired) continue;
+        Vec3 A = host.GetPos(p.A);
+        Vec3 B = host.GetPos(p.B);
+        float dx = A.x - B.x, dy = A.y - B.y, dz = A.z - B.z;
+        float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (d <= p.Radius) {
+            p.Fired = true;
+            CallOnTrigger(host, p.A, p.B);
+        }
+    }
 }
 
 float GameplayScript::EvalExpr(const std::string& expr, float dt) {
     std::string e = Trim(expr);
     if (e.empty()) return 0;
-    // var
     if (m_Vars.count(e)) return m_Vars[e];
     if (e == "dt") return dt;
-    // number
     try { return std::stof(e); } catch (...) {}
-    // a*dt or a*b simple
     auto star = e.find('*');
-    if (star != std::string::npos) {
-        float a = EvalExpr(e.substr(0, star), dt);
-        float b = EvalExpr(e.substr(star + 1), dt);
-        return a * b;
-    }
+    if (star != std::string::npos)
+        return EvalExpr(e.substr(0, star), dt) * EvalExpr(e.substr(star + 1), dt);
     auto plus = e.find('+');
-    if (plus != std::string::npos) {
+    if (plus != std::string::npos)
         return EvalExpr(e.substr(0, plus), dt) + EvalExpr(e.substr(plus + 1), dt);
-    }
     auto minus = e.find('-');
-    if (minus != std::string::npos && minus > 0) {
+    if (minus != std::string::npos && minus > 0)
         return EvalExpr(e.substr(0, minus), dt) - EvalExpr(e.substr(minus + 1), dt);
-    }
     return 0;
 }
 
 bool GameplayScript::EvalCondition(const std::string& cond, ScriptHostCallbacks& host, float dt) {
     auto c = Trim(cond);
     auto tok = SplitWS(c);
-    if (tok.size() >= 2 && tok[0] == "key") {
+    if (tok.size() >= 2 && tok[0] == "key")
         return host.IsKeyDown ? host.IsKeyDown(tok[1]) : false;
-    }
-    // score >= 3
     if (tok.size() >= 3) {
         float left = EvalExpr(tok[0], dt);
         float right = EvalExpr(tok[2], dt);
@@ -131,14 +146,12 @@ void GameplayScript::ExecLine(const std::string& raw, ScriptHostCallbacks& host,
     auto line = Trim(raw);
     if (line.empty()) return;
 
-    // if COND then REST
     if (line.rfind("if ", 0) == 0) {
         auto thenPos = line.find(" then ");
         if (thenPos == std::string::npos) return;
         std::string cond = line.substr(3, thenPos - 3);
         std::string rest = line.substr(thenPos + 6);
-        if (EvalCondition(cond, host, dt))
-            ExecLine(rest, host, dt);
+        if (EvalCondition(cond, host, dt)) ExecLine(rest, host, dt);
         return;
     }
 
@@ -168,11 +181,7 @@ void GameplayScript::ExecLine(const std::string& raw, ScriptHostCallbacks& host,
     } else if (cmd == "show_ui" && tok.size() >= 3) {
         std::string id = tok[1];
         std::string text;
-        for (size_t i = 2; i < tok.size(); ++i) {
-            if (i > 2) text += " ";
-            text += tok[i];
-        }
-        // strip quotes
+        for (size_t i = 2; i < tok.size(); ++i) { if (i > 2) text += " "; text += tok[i]; }
         if (!text.empty() && text.front() == '"') text.erase(0, 1);
         if (!text.empty() && text.back() == '"') text.pop_back();
         if (host.ShowUI) host.ShowUI(id, text);
@@ -186,6 +195,9 @@ void GameplayScript::ExecLine(const std::string& raw, ScriptHostCallbacks& host,
     } else if (cmd == "lose") {
         std::string msg = tok.size() > 1 ? line.substr(line.find(tok[1])) : "Lose";
         if (host.Lose) host.Lose(msg);
+    } else if ((cmd == "proximity" || cmd == "near") && tok.size() >= 3) {
+        float r = tok.size() >= 4 ? EvalExpr(tok[3], dt) : 1.5f;
+        RegisterProximity(tok[1], tok[2], r);
     }
 }
 
@@ -199,6 +211,7 @@ void GameplayScript::CallOnUpdate(ScriptHostCallbacks& host, float dt) {
     for (auto& L : m_Lines)
         if (L.BlockKind == Block::OnUpdate)
             ExecLine(L.Raw, host, dt);
+    UpdateProximity(host);
 }
 
 void GameplayScript::CallOnTrigger(ScriptHostCallbacks& host, const std::string& a, const std::string& b) {
@@ -237,11 +250,25 @@ GameRuntime::Level* GameRuntime::GetLevel(const std::string& id) {
 
 void GameRuntime::SetActiveScript(const std::string& source) {
     m_Script.LoadFromSource(source);
+    SaveScriptToAssets(source, "last_generated.muk");
+}
+
+bool GameRuntime::SaveScriptToAssets(const std::string& source, const std::string& filename) {
+    try {
+        std::filesystem::create_directories("Assets/Scripts");
+        std::string path = "Assets/Scripts/" + filename;
+        std::ofstream out(path);
+        if (!out) return false;
+        out << source;
+        MUK_CORE_INFO("Autosaved script: {0}", path.c_str());
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 void GameRuntime::StartPlay(ScriptHostCallbacks host) {
     m_Host = std::move(host);
-    // wrap UI/win into host
     auto userShow = m_Host.ShowUI;
     m_Host.ShowUI = [this, userShow](const std::string& id, const std::string& text) {
         bool found = false;
@@ -256,13 +283,11 @@ void GameRuntime::StartPlay(ScriptHostCallbacks host) {
     };
     auto userWin = m_Host.Win;
     m_Host.Win = [this, userWin](const std::string& msg) {
-        m_Won = true; m_Banner = msg;
-        if (userWin) userWin(msg);
+        m_Won = true; m_Banner = msg; if (userWin) userWin(msg);
     };
     auto userLose = m_Host.Lose;
     m_Host.Lose = [this, userLose](const std::string& msg) {
-        m_Lost = true; m_Banner = msg;
-        if (userLose) userLose(msg);
+        m_Lost = true; m_Banner = msg; if (userLose) userLose(msg);
     };
 
     m_Won = m_Lost = false;
@@ -271,9 +296,7 @@ void GameRuntime::StartPlay(ScriptHostCallbacks host) {
     m_Script.CallOnStart(m_Host);
 }
 
-void GameRuntime::StopPlay() {
-    m_Playing = false;
-}
+void GameRuntime::StopPlay() { m_Playing = false; }
 
 void GameRuntime::Update(float dt) {
     if (!m_Playing || m_Won || m_Lost) return;
