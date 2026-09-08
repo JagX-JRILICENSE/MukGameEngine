@@ -17,7 +17,6 @@
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 
-// Minimal layer interfaces (see Jolt HelloWorld for production setup)
 namespace {
     constexpr JPH::ObjectLayer LAYER_NON_MOVING = 0;
     constexpr JPH::ObjectLayer LAYER_MOVING = 1;
@@ -84,10 +83,7 @@ struct PhysicsWorld::JoltState {
 #endif
 
 PhysicsWorld::PhysicsWorld() = default;
-
-PhysicsWorld::~PhysicsWorld() {
-    Shutdown();
-}
+PhysicsWorld::~PhysicsWorld() { Shutdown(); }
 
 void PhysicsWorld::Initialize() {
 #ifdef MUK_USE_JOLT
@@ -164,6 +160,22 @@ bool PhysicsWorld::IsUsingJolt() const {
     return m_Jolt != nullptr && m_Jolt->System != nullptr;
 #else
     return false;
+#endif
+}
+
+void* PhysicsWorld::GetJoltSystemPtr() const {
+#ifdef MUK_USE_JOLT
+    return m_Jolt ? m_Jolt->System : nullptr;
+#else
+    return nullptr;
+#endif
+}
+
+void* PhysicsWorld::GetJoltTempAllocatorPtr() const {
+#ifdef MUK_USE_JOLT
+    return m_Jolt ? m_Jolt->TempAllocator : nullptr;
+#else
+    return nullptr;
 #endif
 }
 
@@ -249,9 +261,7 @@ void PhysicsWorld::SetGravity(const Vec3& gravity) {
 #endif
 }
 
-Vec3 PhysicsWorld::GetGravity() const {
-    return m_Gravity;
-}
+Vec3 PhysicsWorld::GetGravity() const { return m_Gravity; }
 
 void PhysicsWorld::Update(f32 deltaTime) {
     if (!m_Initialized) return;
