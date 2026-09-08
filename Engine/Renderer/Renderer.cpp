@@ -4,6 +4,7 @@
 #include "RHI/DX12/DX12RHI.h"
 #include "RHI/DX12/DX12Pipeline.h"
 #include "RHI/DX12/DX12SceneRT.h"
+#include "RHI/DX12/DX12ShadowMap.h"
 
 namespace Muk {
 
@@ -29,6 +30,10 @@ bool Renderer::Initialize(void* windowHandle, u32 width, u32 height) {
             m_Pipeline.reset();
         }
         m_SceneRT = std::make_unique<DX12SceneRT>();
+        m_ShadowMap = std::make_unique<DX12ShadowMap>();
+        m_ShadowMap->Create(dx12->GetDevice(), 1024,
+                            dx12->GetImGuiSrvHeap(), dx12->GetSrvDescriptorSize(),
+                            dx12->GetSrvBumpIndex(), dx12->GetSrvMaxCount());
     }
 #endif
 
@@ -38,6 +43,7 @@ bool Renderer::Initialize(void* windowHandle, u32 width, u32 height) {
 }
 
 void Renderer::Shutdown() {
+    if (m_ShadowMap) { m_ShadowMap->Destroy(); m_ShadowMap.reset(); }
     if (m_SceneRT) { m_SceneRT->Destroy(); m_SceneRT.reset(); }
     if (m_Pipeline) { m_Pipeline->Shutdown(); m_Pipeline.reset(); }
     if (m_RHI) { m_RHI->Shutdown(); m_RHI.reset(); }
@@ -69,9 +75,38 @@ void Renderer::RebuildViewProjection() {
     f32 aspect = m_Height > 0 ? (f32)m_Width / (f32)m_Height : 1.0f;
     if (m_RenderingToSceneRT && m_SceneRT && m_SceneRT->IsValid())
         aspect = (f32)m_SceneRT->GetWidth() / (f32)m_SceneRT->GetHeight();
-    Mat4 view = Mat4::LookAt(m_Camera.Eye, m_Camera.Target, m_Camera.Up);
-    Mat4 proj = Mat4::Perspective(ToRadians(m_Camera.FOVDegrees), aspect, m_Camera.Near, m_Camera.Far);
-    m_ViewProjection = proj * view;
+    m_View = Mat4::LookAt(m_Camera.Eye, m_Camera.Target, m_Camera.Up);
+    m_Proj = Mat4::Perspective(ToRadians(m_Camera.FOVDegrees), aspect, m_Camera.Near, m_Camera.Far);
+    m_ViewProjection = m_Proj * m_View;
+}
+
+Mat4 Renderer::GetViewMatrix() const { return m_View; }
+Mat4 Renderer::GetProjectionMatrix() const { return m_Proj; }
+
+bool Renderer::ShadowsEnabled() const {
+    return m_ShadowMap && m_ShadowMap->IsValid();
+}
+
+void Renderer::BeginShadowPass(const Vec3& focus, f32 radius) {
+#ifdef MUK_RHI_DX12
+    auto* dx12 = dynamic_cast<DX12RHI*>(m_RHI.get());
+    if (!dx12 || !m_ShadowMap || !m_ShadowMap->IsValid() || !m_Pipeline) return;
+    m_ShadowMap->UpdateLightMatrix(m_LightDir, focus, radius);
+    m_ShadowMap->Begin(dx12->GetCommandList());
+    m_Pipeline->BindShadow(dx12->GetCommandList());
+    m_InShadowPass = true;
+#else
+    (void)focus; (void)radius;
+#endif
+}
+
+void Renderer::EndShadowPass() {
+#ifdef MUK_RHI_DX12
+    auto* dx12 = dynamic_cast<DX12RHI*>(m_RHI.get());
+    if (!dx12 || !m_ShadowMap) return;
+    m_ShadowMap->End(dx12->GetCommandList());
+    m_InShadowPass = false;
+#endif
 }
 
 bool Renderer::UploadMesh(const std::string& name, const Mesh& mesh) {
@@ -99,6 +134,16 @@ void Renderer::DrawMesh(const std::string& meshName, const Mat4& world, const Ma
     auto* dx12 = dynamic_cast<DX12RHI*>(m_RHI.get());
     if (!dx12 || !m_Pipeline || !m_Pipeline->IsReady()) return;
 
+    Mat4 lightVP = m_ShadowMap && m_ShadowMap->IsValid() ? m_ShadowMap->GetLightViewProj() : Mat4::Identity();
+
+    if (m_InShadowPass) {
+        Mat4 mvp = lightVP * world;
+        m_Pipeline->SetDrawParams(mvp, world, lightVP, material,
+                                  m_LightDir, m_LightColor, m_LightIntensity, m_Ambient, false);
+        m_Pipeline->DrawMesh(dx12->GetCommandList(), meshName);
+        return;
+    }
+
     if (material.AlbedoMap && material.AlbedoMap->IsValid()) {
         std::string key = material.AlbedoTexture.empty() ? material.AlbedoMap->Name : material.AlbedoTexture;
         if (!key.empty())
@@ -107,16 +152,24 @@ void Renderer::DrawMesh(const std::string& meshName, const Mat4& world, const Ma
 
     Mat4 mvp = m_ViewProjection * world;
     auto* cmd = dx12->GetCommandList();
-    m_Pipeline->Bind(cmd);
-    m_Pipeline->SetDrawParams(mvp, world, material, m_LightDir, m_LightColor, m_LightIntensity, m_Ambient);
+    m_Pipeline->BindLit(cmd);
+    m_Pipeline->SetDrawParams(mvp, world, lightVP, material,
+                              m_LightDir, m_LightColor, m_LightIntensity, m_Ambient,
+                              ShadowsEnabled());
 
-    D3D12_GPU_DESCRIPTOR_HANDLE srv = m_Pipeline->Textures().GetWhiteSrv();
+    D3D12_GPU_DESCRIPTOR_HANDLE albedo = m_Pipeline->Textures().GetWhiteSrv();
     if (material.AlbedoMap) {
         std::string key = material.AlbedoTexture.empty() ? material.AlbedoMap->Name : material.AlbedoTexture;
         if (auto* gpu = m_Pipeline->Textures().Get(key))
-            srv = gpu->GpuSrv;
+            albedo = gpu->GpuSrv;
     }
-    cmd->SetGraphicsRootDescriptorTable(1, srv);
+    cmd->SetGraphicsRootDescriptorTable(1, albedo);
+
+    if (m_ShadowMap && m_ShadowMap->IsValid())
+        cmd->SetGraphicsRootDescriptorTable(2, m_ShadowMap->GetDepthSrvGpu());
+    else
+        cmd->SetGraphicsRootDescriptorTable(2, m_Pipeline->Textures().GetWhiteSrv());
+
     m_Pipeline->DrawMesh(cmd, meshName);
 #else
     (void)meshName; (void)world; (void)material;
