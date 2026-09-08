@@ -16,6 +16,7 @@ set(ENGINE_SOURCES
     Renderer/Renderer.cpp
     Renderer/Mesh.cpp
     Input/Input.cpp
+    Input/InputActions.cpp
     Physics/PhysicsWorld.cpp
     Physics/CharacterController.cpp
     Asset/AssetManager.cpp
@@ -25,13 +26,16 @@ set(ENGINE_SOURCES
     EditorUI/ViewportGizmo.cpp
     Editor/UndoStack.cpp
     Editor/PlayInEditor.cpp
+    Editor/Screenshot.cpp
     AI/UserSettings.cpp
     AI/AIClient.cpp
     AI/AIControlPanel.cpp
     AI/AIGameAgent.cpp
     AI/MultiAgentTeam.cpp
+    AI/AsyncAI.cpp
     Scene/SceneRenderer.cpp
     Scene/SceneSerializer.cpp
+    Scene/Prefab.cpp
     Animation/Skeleton.cpp
     Audio/AudioSystem.cpp
     Reflection/Reflection.cpp
@@ -62,6 +66,7 @@ set(ENGINE_HEADERS
     Renderer/Texture.h
     Renderer/PostSettings.h
     Input/Input.h
+    Input/InputActions.h
     Physics/PhysicsWorld.h
     Physics/CharacterController.h
     Asset/AssetManager.h
@@ -71,13 +76,16 @@ set(ENGINE_HEADERS
     EditorUI/ViewportGizmo.h
     Editor/UndoStack.h
     Editor/PlayInEditor.h
+    Editor/Screenshot.h
     AI/UserSettings.h
     AI/AIClient.h
     AI/AIControlPanel.h
     AI/AIGameAgent.h
     AI/MultiAgentTeam.h
+    AI/AsyncAI.h
     Scene/SceneRenderer.h
     Scene/SceneSerializer.h
+    Scene/Prefab.h
     Animation/Skeleton.h
     Audio/AudioSystem.h
     Reflection/Reflection.h
@@ -90,7 +98,9 @@ add_library(MukEngine STATIC ${ENGINE_SOURCES} ${ENGINE_HEADERS})
 target_include_directories(MukEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
-    target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler winhttp shell32 ole32 xaudio2)
+    target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler winhttp shell32 ole32)
+    # XAudio2 is part of Windows SDK; link if available
+    target_link_libraries(MukEngine PUBLIC xaudio2)
 endif()
 
 if(MUK_USE_IMGUI)
