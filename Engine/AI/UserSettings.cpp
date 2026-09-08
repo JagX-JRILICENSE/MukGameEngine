@@ -21,6 +21,35 @@ static std::string Trim(const std::string& s) {
     return s.substr(a, b - a + 1);
 }
 
+const std::vector<FreeModelOption>& UserSettings::OpenRouterFreeModels() {
+    static const std::vector<FreeModelOption> k = {
+        { "nvidia/nemotron-3.5-lightning:free", "NVIDIA Nemotron 3.5 Lightning (FREE)", true },
+        { "nvidia/nemotron-3-ultra-550b-a55b:free", "NVIDIA Nemotron 3 Ultra (FREE)", true },
+        { "nvidia/nemotron-3-super-120b-a12b:free", "NVIDIA Nemotron 3 Super (FREE)", true },
+        { "google/gemma-4-31b-it:free", "Google Gemma 4 31B (FREE)", true },
+        { "google/gemma-4-26b-a4b-it:free", "Google Gemma 4 26B (FREE)", true },
+        { "openrouter/free", "OpenRouter Free Models Router (FREE)", true },
+        { "liquid/lfm-2.5-2.6b:free", "LiquidAI LFM 2.5 (FREE)", true },
+        { "poolside/laguna-s-2.1:free", "Poolside Laguna S 2.1 (FREE)", true },
+        { "cohere/north-mini-code:free", "Cohere North Mini Code (FREE)", true },
+        { "thinkingmachines/inkling-small:free", "Thinking Machines Inkling Small (FREE)", true },
+    };
+    return k;
+}
+
+const std::vector<FreeModelOption>& UserSettings::NvidiaFreeModels() {
+    // Hosted endpoints at build.nvidia.com / integrate.api.nvidia.com (free credits / free endpoints)
+    static const std::vector<FreeModelOption> k = {
+        { "meta/llama-3.1-8b-instruct", "Meta Llama 3.1 8B (NVIDIA free tier)", true },
+        { "meta/llama-3.3-70b-instruct", "Meta Llama 3.3 70B (NVIDIA)", true },
+        { "nvidia/llama-3.1-nemotron-70b-instruct", "NVIDIA Nemotron 70B", true },
+        { "mistralai/mistral-7b-instruct-v0.3", "Mistral 7B Instruct (NVIDIA)", true },
+        { "google/gemma-2-9b-it", "Google Gemma 2 9B (NVIDIA)", true },
+        { "qwen/qwen2.5-coder-32b-instruct", "Qwen 2.5 Coder 32B (NVIDIA)", true },
+    };
+    return k;
+}
+
 std::string UserSettings::SettingsPath() {
 #ifdef MUK_PLATFORM_WINDOWS
     wchar_t* appdata = nullptr;
@@ -62,10 +91,9 @@ bool UserSettings::Load() {
     const std::string path = SettingsPath();
     std::ifstream in(path);
     if (!in) {
-        // Try local fallback
         in.open("config/settings.ini");
         if (!in) {
-            MUK_CORE_INFO("No settings.ini yet — create one at {0}", path.c_str());
+            MUK_CORE_INFO("No settings.ini yet — {0}", path.c_str());
             return false;
         }
     }
@@ -94,8 +122,8 @@ bool UserSettings::Load() {
         else if (key == "custom_model") CustomModel = val;
     }
 
-    MUK_CORE_INFO("Loaded settings (provider={0}, key={1})",
-                  Provider.c_str(), HasAnyKey() ? "set" : "missing");
+    MUK_CORE_INFO("Loaded settings (provider={0}, model={1}, key={2})",
+                  Provider.c_str(), ActiveModel().c_str(), HasAnyKey() ? "set" : "missing");
     return true;
 }
 
@@ -113,8 +141,9 @@ bool UserSettings::Save() const {
         return false;
     }
 
-    out << "# Muk Game Engine — user settings (BYOK)\n";
-    out << "# Keep this file private. Never commit API keys.\n\n";
+    out << "# Muk Game Engine — BYOK (never commit real keys)\n";
+    out << "# Free OpenRouter models end with :free\n";
+    out << "# NVIDIA key from https://build.nvidia.com (Get API Key)\n\n";
     out << "provider=" << Provider << "\n\n";
     out << "openrouter_api_key=" << OpenRouterApiKey << "\n";
     out << "openrouter_model=" << OpenRouterModel << "\n";
