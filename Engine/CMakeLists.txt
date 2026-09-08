@@ -29,11 +29,13 @@ set(ENGINE_SOURCES
     AI/AIClient.cpp
     AI/AIControlPanel.cpp
     AI/AIGameAgent.cpp
+    AI/MultiAgentTeam.cpp
     Scene/SceneRenderer.cpp
     Scene/SceneSerializer.cpp
     Animation/Skeleton.cpp
     Audio/AudioSystem.cpp
     Reflection/Reflection.cpp
+    Script/GameplayScript.cpp
 )
 
 set(ENGINE_HEADERS
@@ -73,11 +75,13 @@ set(ENGINE_HEADERS
     AI/AIClient.h
     AI/AIControlPanel.h
     AI/AIGameAgent.h
+    AI/MultiAgentTeam.h
     Scene/SceneRenderer.h
     Scene/SceneSerializer.h
     Animation/Skeleton.h
     Audio/AudioSystem.h
     Reflection/Reflection.h
+    Script/GameplayScript.h
     Engine.h
 )
 
