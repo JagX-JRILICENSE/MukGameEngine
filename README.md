@@ -1,70 +1,55 @@
-# Muk Game Engine v0.6
+# Muk Game Engine v0.6.1
 
 C++20 / DirectX 12 Windows engine.
 
-**Repo:** https://github.com/JagX-JRILICENSE/MukGameEngine · [ROADMAP.md](ROADMAP.md)
+**Repo:** https://github.com/JagX-JRILICENSE/MukGameEngine
 
 ---
 
-## Current features
+## Download Windows app (CI)
 
-### Rendering
-- DX12 device, swapchain, depth buffer
-- Mesh cache, albedo GPU textures, lit Lambert + metal/rough terms
-- **Cascaded shadows (3)** Texture2DArray + **soft 3×3 PCF**
-- Editor SceneRT viewport (render-to-texture)
+1. Open **Actions** → **Windows Build**
+2. Open the latest **green** run (or **Run workflow**)
+3. Download artifact **`MukGameEngine-Windows-x64`**
+4. Unzip → run `bin\MukEditor.exe`
 
-### Editor
-- Docking panels: Hierarchy, Details, Viewport, Console, Content, Stats, AI, Toolbar
-- **ImGuizmo** T/R/Y in viewport
-- **Undo / Redo** (Ctrl+Z / Ctrl+Y) for transforms
-- **Play-In-Editor** (F5 / Toolbar) — snapshot scene, play, stop restores
-
-### Gameplay / physics
-- ECS: Transform, MeshRenderer, DirectionalLight, Camera, RigidBody, Name
-- Jolt Physics (optional) + simple fallback
-- **CharacterVirtual** (or kinematic) — WASD + Space
-
-### Assets / AI
-- glTF path (tinygltf), materials/textures
-- **BYOK AI**: OpenRouter, NVIDIA, OpenAI, custom
-
-### Build / ship
-- CMake + `scripts/build_windows.ps1 -Full`
-- GitHub Actions Windows artifact
+Main CI builds **ImGui + tinygltf** (stable). Jolt is optional/non-blocking.
 
 ---
 
-## Controls
+## Free AI (OpenRouter + NVIDIA)
 
-| Input | Action |
-|-------|--------|
-| T / R / Y | Gizmo mode |
-| Ctrl+Z / Ctrl+Y | Undo / Redo |
-| F5 | Play / Stop PIE |
-| WASD + Space | Character (especially in Play) |
+Keys stay on your PC. Defaults use **free** models.
+
+### OpenRouter (free `:free` models)
+
+1. Create a key at https://openrouter.ai/keys  
+2. In editor **AI Control** → provider `openrouter` → paste key → **Apply** → **Save**  
+3. Click a **FREE** model, e.g.:
+   - `nvidia/nemotron-3.5-lightning:free`
+   - `nvidia/nemotron-3-ultra-550b-a55b:free`
+   - `google/gemma-4-31b-it:free`
+   - `openrouter/free`
+
+### NVIDIA (build.nvidia.com)
+
+1. Sign in at https://build.nvidia.com → **Get API Key** (`nvapi-...`)  
+2. Provider `nvidia` → paste key → pick e.g. `meta/llama-3.1-8b-instruct`  
+3. Base URL: `https://integrate.api.nvidia.com/v1`
+
+Or edit `%APPDATA%\MukGameEngine\settings.ini` (see `config/settings.example.ini`).
 
 ---
 
-## Build
+## Local build
 
 ```powershell
-./scripts/build_windows.ps1 -Full
+cmake -B build -G "Visual Studio 17 2022" -A x64 `
+  -DMUK_USE_IMGUI=ON -DMUK_USE_TINYGLTF=ON -DMUK_USE_JOLT=OFF
+cmake --build build --config Release
+# Exe: build\bin\Release\MukEditor.exe
 ```
 
-`-DMUK_USE_IMGUI=ON -DMUK_USE_JOLT=ON -DMUK_USE_TINYGLTF=ON`
-
 ---
-
-## What to add next (priority)
-
-1. **Per-pixel cascade selection** (upload all 3 LightVPs + splits to CB)
-2. **Animation** (skinned meshes / clips)
-3. **Audio** (spatial)
-4. **Content Browser** import + reimport
-5. **Reflection / property UI** for all components
-6. **Save / load** world JSON
-7. **PBR IBL** + post (bloom, tonemap)
-8. **Deeper AI actions** (materials, spawn prefabs)
 
 MIT
