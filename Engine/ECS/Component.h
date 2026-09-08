@@ -3,6 +3,7 @@
 #include "Core/Core.h"
 #include "Math/Vector.h"
 #include "Math/Matrix.h"
+#include <string>
 
 namespace Muk {
 
@@ -23,8 +24,8 @@ struct Transform : public IComponent {
 };
 
 struct MeshRenderer : public IComponent {
-    std::string MeshPath;
-    // Material handle, etc. later
+    std::string MeshName = "Cube";      // Looked up in AssetManager
+    std::string MaterialName = "Default";
 };
 
 struct Camera : public IComponent {
@@ -32,6 +33,12 @@ struct Camera : public IComponent {
     f32 Near = 0.1f;
     f32 Far = 1000.0f;
     bool Primary = true;
+};
+
+/** Links an entity to a physics body in PhysicsWorld */
+struct RigidBodyComponent : public IComponent {
+    EntityID BodyId = 0;  // Handle returned by PhysicsWorld::CreateBody
+    bool SyncTransform = true; // Write physics position back to Transform each frame
 };
 
 } // namespace Muk
