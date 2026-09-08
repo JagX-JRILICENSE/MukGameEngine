@@ -13,18 +13,18 @@ cbuffer FrameConstants : register(b0)
 {
     float4x4 MVP;
     float4x4 World;
-    float4x4 LightVP;      // cascade 0 (kept for compat)
+    float4x4 LightVP0;
+    float4x4 LightVP1;
+    float4x4 LightVP2;
     float4   BaseColor;
     float4   LightDir;
     float4   LightColor;
+    float4   CascadeSplits; // x,y,z split distances; w unused
     float    UseTexture;
     float    Metallic;
     float    Roughness;
     float    ReceiveShadows;
-    // Extra cascade data packed after standard block via second CB section in CPU —
-    // For simplicity cascade VPs are in LightVP only for cascade0; full cascade
-    // uses Texture2DArray + distance-based pick with splits in LightColor.w unused.
-    // Soft PCF uses texel size from 1/1024.
+    float4   CamPos; // xyz + exposure w
 };
 
 Texture2D    AlbedoTex : register(t0);
@@ -44,7 +44,6 @@ struct PSInput {
     float3 WorldPos : TEXCOORD0;
     float4 Color    : COLOR;
     float2 TexCoord : TEXCOORD1;
-    float4 ShadowPos : TEXCOORD2;
 };
 
 PSInput VSMain(VSInput input) {
@@ -55,31 +54,25 @@ PSInput VSMain(VSInput input) {
     o.NormalWS = normalize(mul(float4(input.Normal, 0.0f), World).xyz);
     o.Color = input.Color;
     o.TexCoord = input.TexCoord;
-    o.ShadowPos = mul(wp, LightVP);
     return o;
 }
 
-// 3x3 soft PCF
 float SoftPCF(Texture2DArray sm, SamplerComparisonState s, float3 uvz, float cascade) {
     float shadow = 0.0;
     float texel = 1.0 / 1024.0;
-    [unroll]
-    for (int y = -1; y <= 1; ++y)
-        [unroll]
-        for (int x = -1; x <= 1; ++x) {
-            float2 offset = float2(x, y) * texel;
-            shadow += sm.SampleCmpLevelZero(s, float3(uvz.xy + offset, cascade), uvz.z);
-        }
+    [unroll] for (int y = -1; y <= 1; ++y)
+        [unroll] for (int x = -1; x <= 1; ++x)
+            shadow += sm.SampleCmpLevelZero(s, float3(uvz.xy + float2(x,y)*texel, cascade), uvz.z);
     return shadow / 9.0;
 }
 
-float SampleCascadeShadow(float4 sp, float cascadeIndex) {
+float SampleCascade(float4x4 lightVP, float cascadeIndex, float3 worldPos) {
+    float4 sp = mul(float4(worldPos, 1.0), lightVP);
     float3 proj = sp.xyz / max(sp.w, 1e-5);
     float2 uv = proj.xy * 0.5 + 0.5;
     uv.y = 1.0 - uv.y;
     if (uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) return 1.0;
-    float bias = 0.0015;
-    return SoftPCF(ShadowMap, ShadowSam, float3(uv, proj.z - bias), cascadeIndex);
+    return SoftPCF(ShadowMap, ShadowSam, float3(uv, proj.z - 0.0015), cascadeIndex);
 }
 
 float4 PSMain(PSInput input) : SV_TARGET {
@@ -92,16 +85,29 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float ndotl = saturate(dot(N, L));
     float diffuse = lerp(ndotl, ndotl * 0.5 + 0.5, saturate(Roughness));
 
+    // Per-pixel cascade by distance from camera
+    float dist = length(input.WorldPos - CamPos.xyz);
+    float cascade = 0;
+    if (dist > CascadeSplits.y) cascade = 2;
+    else if (dist > CascadeSplits.x) cascade = 1;
+
     float shadow = 1.0;
     if (ReceiveShadows > 0.5) {
-        // Cascade 0 only via LightVP for this draw; multi-cascade matrix
-        // selection is applied on CPU by uploading best cascade LightVP.
-        // Soft PCF always on cascade slice 0 of the array for the active map.
-        shadow = SampleCascadeShadow(input.ShadowPos, 0);
+        if (cascade < 0.5) shadow = SampleCascade(LightVP0, 0, input.WorldPos);
+        else if (cascade < 1.5) shadow = SampleCascade(LightVP1, 1, input.WorldPos);
+        else shadow = SampleCascade(LightVP2, 2, input.WorldPos);
     }
 
-    float3 lit = albedo.rgb * LightColor.rgb * (LightDir.w * diffuse * shadow + LightColor.w);
+    // Cheap hemispheric IBL
+    float hemi = N.y * 0.5 + 0.5;
+    float3 ibl = lerp(float3(0.12,0.11,0.10), float3(0.45,0.55,0.75), hemi) * 0.25;
+
+    float3 lit = albedo.rgb * (LightColor.rgb * (LightDir.w * diffuse * shadow) + LightColor.w + ibl);
     lit += albedo.rgb * Metallic * LightColor.rgb * ndotl * shadow * 0.35;
+
+    // Exposure + simple Reinhard tonemap
+    lit *= max(CamPos.w, 0.01);
+    lit = lit / (lit + 1.0);
     return float4(lit, albedo.a);
 }
 )";
@@ -111,27 +117,28 @@ cbuffer FrameConstants : register(b0)
 {
     float4x4 MVP;
     float4x4 World;
-    float4x4 LightVP;
+    float4x4 LightVP0;
+    float4x4 LightVP1;
+    float4x4 LightVP2;
     float4   BaseColor;
     float4   LightDir;
     float4   LightColor;
+    float4   CascadeSplits;
     float    UseTexture;
     float    Metallic;
     float    Roughness;
     float    ReceiveShadows;
+    float4   CamPos;
 };
-
 struct VSInput {
     float3 Position : POSITION;
     float3 Normal   : NORMAL;
     float2 TexCoord : TEXCOORD;
     float4 Color    : COLOR;
 };
-
 float4 VSMain(VSInput input) : SV_POSITION {
     return mul(float4(input.Position, 1.0f), MVP);
 }
-
 void PSMain() {}
 )";
 
@@ -146,7 +153,7 @@ bool DX12Pipeline::Initialize(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_
     heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
     D3D12_RESOURCE_DESC cbDesc = {};
     cbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    cbDesc.Width = 512;
+    cbDesc.Width = 1024;
     cbDesc.Height = 1;
     cbDesc.DepthOrArraySize = 1;
     cbDesc.MipLevels = 1;
@@ -159,15 +166,12 @@ bool DX12Pipeline::Initialize(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_
 
     m_ConstantBuffer->Map(0, nullptr, &m_CBMapped);
     m_Ready = true;
-    MUK_CORE_INFO("DX12Pipeline ready (lit + soft PCF + cascades)");
+    MUK_CORE_INFO("DX12Pipeline ready (per-pixel cascades + IBL/tonemap)");
     return true;
 }
 
 void DX12Pipeline::Shutdown() {
-    if (m_ConstantBuffer && m_CBMapped) {
-        m_ConstantBuffer->Unmap(0, nullptr);
-        m_CBMapped = nullptr;
-    }
+    if (m_ConstantBuffer && m_CBMapped) { m_ConstantBuffer->Unmap(0, nullptr); m_CBMapped = nullptr; }
     m_Textures.Shutdown();
     m_MeshCache.clear();
     m_ConstantBuffer.Reset();
@@ -190,12 +194,10 @@ bool DX12Pipeline::CreateRootSignature(ID3D12Device* device) {
     params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     params[0].Descriptor.ShaderRegister = 0;
     params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-
     params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     params[1].DescriptorTable.NumDescriptorRanges = 1;
     params[1].DescriptorTable.pDescriptorRanges = &ranges[0];
     params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-
     params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     params[2].DescriptorTable.NumDescriptorRanges = 1;
     params[2].DescriptorTable.pDescriptorRanges = &ranges[1];
@@ -206,7 +208,6 @@ bool DX12Pipeline::CreateRootSignature(ID3D12Device* device) {
     samplers[0].AddressU = samplers[0].AddressV = samplers[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     samplers[0].ShaderRegister = 0;
     samplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-
     samplers[1].Filter = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
     samplers[1].AddressU = samplers[1].AddressV = samplers[1].AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
     samplers[1].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
@@ -234,8 +235,7 @@ bool DX12Pipeline::CompileShader(const char* source, const char* entry, const ch
 #ifdef _DEBUG
     flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
 #endif
-    HRESULT hr = D3DCompile(source, std::strlen(source), "shader",
-                            nullptr, nullptr, entry, target, flags, 0, &outBlob, &error);
+    HRESULT hr = D3DCompile(source, std::strlen(source), "shader", nullptr, nullptr, entry, target, flags, 0, &outBlob, &error);
     if (FAILED(hr)) {
         if (error) MUK_CORE_ERROR("Shader: {0}", (const char*)error->GetBufferPointer());
         return false;
@@ -247,14 +247,12 @@ bool DX12Pipeline::CreateLitPSO(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXG
     ComPtr<ID3DBlob> vs, ps;
     if (!CompileShader(g_LitHLSL, "VSMain", "vs_5_0", vs)) return false;
     if (!CompileShader(g_LitHLSL, "PSMain", "ps_5_0", ps)) return false;
-
     D3D12_INPUT_ELEMENT_DESC layout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
     };
-
     D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
     pso.pRootSignature = m_RootSignature.Get();
     pso.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
@@ -280,14 +278,12 @@ bool DX12Pipeline::CreateShadowPSO(ID3D12Device* device) {
     ComPtr<ID3DBlob> vs, ps;
     if (!CompileShader(g_ShadowHLSL, "VSMain", "vs_5_0", vs)) return false;
     if (!CompileShader(g_ShadowHLSL, "PSMain", "ps_5_0", ps)) return false;
-
     D3D12_INPUT_ELEMENT_DESC layout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
     };
-
     D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
     pso.pRootSignature = m_RootSignature.Get();
     pso.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
@@ -319,22 +315,18 @@ bool DX12Pipeline::UploadMesh(ID3D12Device* device, const std::string& name, con
     const auto& vertices = mesh.GetVertices();
     const auto& indices = mesh.GetIndices();
     if (vertices.empty() || indices.empty()) return false;
-
     auto gpu = std::make_unique<GPUMeshBuffers>();
     const u64 vbSize = vertices.size() * sizeof(Vertex);
     const u64 ibSize = indices.size() * sizeof(u32);
-
     D3D12_HEAP_PROPERTIES uploadHeap = {};
     uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
     D3D12_RESOURCE_DESC bufDesc = {};
     bufDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
     bufDesc.Height = 1; bufDesc.DepthOrArraySize = 1; bufDesc.MipLevels = 1;
     bufDesc.SampleDesc.Count = 1; bufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
     bufDesc.Width = vbSize;
     if (FAILED(device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&gpu->VertexBuffer))))
-        return false;
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&gpu->VertexBuffer)))) return false;
     void* mapped = nullptr;
     gpu->VertexBuffer->Map(0, nullptr, &mapped);
     std::memcpy(mapped, vertices.data(), (size_t)vbSize);
@@ -342,11 +334,9 @@ bool DX12Pipeline::UploadMesh(ID3D12Device* device, const std::string& name, con
     gpu->VBV.BufferLocation = gpu->VertexBuffer->GetGPUVirtualAddress();
     gpu->VBV.SizeInBytes = (UINT)vbSize;
     gpu->VBV.StrideInBytes = sizeof(Vertex);
-
     bufDesc.Width = ibSize;
     if (FAILED(device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&gpu->IndexBuffer))))
-        return false;
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&gpu->IndexBuffer)))) return false;
     gpu->IndexBuffer->Map(0, nullptr, &mapped);
     std::memcpy(mapped, indices.data(), (size_t)ibSize);
     gpu->IndexBuffer->Unmap(0, nullptr);
@@ -377,39 +367,54 @@ void DX12Pipeline::BindShadow(ID3D12GraphicsCommandList* cmdList) {
     cmdList->SetGraphicsRootConstantBufferView(0, m_ConstantBuffer->GetGPUVirtualAddress());
 }
 
-void DX12Pipeline::SetDrawParams(const Mat4& mvp, const Mat4& world, const Mat4& lightVP,
+void DX12Pipeline::SetDrawParams(const Mat4& mvp, const Mat4& world,
+                                 const Mat4 lightVP[3], const float splits[3],
                                  const Material& material,
                                  const Vec3& lightDir, const Vec3& lightColor, f32 intensity, f32 ambient,
-                                 bool receiveShadows) {
+                                 bool receiveShadows, const Vec3& camPos, f32 exposure) {
     if (!m_CBMapped) return;
     FrameCB cb = {};
-    std::memcpy(cb.MVP, mvp.m, sizeof(float) * 16);
-    std::memcpy(cb.World, world.m, sizeof(float) * 16);
-    std::memcpy(cb.LightVP, lightVP.m, sizeof(float) * 16);
-    cb.BaseColor[0] = material.BaseColor.x;
-    cb.BaseColor[1] = material.BaseColor.y;
-    cb.BaseColor[2] = material.BaseColor.z;
-    cb.BaseColor[3] = material.BaseColor.w;
-
+    std::memcpy(cb.MVP, mvp.m, 64);
+    std::memcpy(cb.World, world.m, 64);
+    if (lightVP) {
+        std::memcpy(cb.LightVP0, lightVP[0].m, 64);
+        std::memcpy(cb.LightVP1, lightVP[1].m, 64);
+        std::memcpy(cb.LightVP2, lightVP[2].m, 64);
+    }
+    if (splits) {
+        cb.CascadeSplits[0] = splits[0];
+        cb.CascadeSplits[1] = splits[1];
+        cb.CascadeSplits[2] = splits[2];
+    } else {
+        cb.CascadeSplits[0] = 8; cb.CascadeSplits[1] = 20; cb.CascadeSplits[2] = 40;
+    }
+    cb.BaseColor[0] = material.BaseColor.x; cb.BaseColor[1] = material.BaseColor.y;
+    cb.BaseColor[2] = material.BaseColor.z; cb.BaseColor[3] = material.BaseColor.w;
     f32 len = std::sqrt(lightDir.x*lightDir.x + lightDir.y*lightDir.y + lightDir.z*lightDir.z);
     if (len < 1e-5f) len = 1.0f;
-    cb.LightDir[0] = lightDir.x / len;
-    cb.LightDir[1] = lightDir.y / len;
-    cb.LightDir[2] = lightDir.z / len;
-    cb.LightDir[3] = intensity;
-    cb.LightColor[0] = lightColor.x;
-    cb.LightColor[1] = lightColor.y;
-    cb.LightColor[2] = lightColor.z;
-    cb.LightColor[3] = ambient;
-
+    cb.LightDir[0] = lightDir.x / len; cb.LightDir[1] = lightDir.y / len;
+    cb.LightDir[2] = lightDir.z / len; cb.LightDir[3] = intensity;
+    cb.LightColor[0] = lightColor.x; cb.LightColor[1] = lightColor.y;
+    cb.LightColor[2] = lightColor.z; cb.LightColor[3] = ambient;
     std::string key = material.AlbedoTexture.empty()
-        ? (material.AlbedoMap ? material.AlbedoMap->Name : "")
-        : material.AlbedoTexture;
+        ? (material.AlbedoMap ? material.AlbedoMap->Name : "") : material.AlbedoTexture;
     cb.UseTexture = (!key.empty() && m_Textures.Has(key)) ? 1.0f : 0.0f;
     cb.Metallic = material.Metallic;
     cb.Roughness = material.Roughness;
     cb.ReceiveShadows = receiveShadows ? 1.0f : 0.0f;
+    cb.CamPos[0] = camPos.x; cb.CamPos[1] = camPos.y; cb.CamPos[2] = camPos.z;
+    cb.CamPos[3] = exposure;
     std::memcpy(m_CBMapped, &cb, sizeof(FrameCB));
+}
+
+void DX12Pipeline::SetDrawParams(const Mat4& mvp, const Mat4& world, const Mat4& lightVP,
+                                 const Material& material,
+                                 const Vec3& lightDir, const Vec3& lightColor, f32 intensity, f32 ambient,
+                                 bool receiveShadows) {
+    Mat4 vps[3] = { lightVP, lightVP, lightVP };
+    float splits[3] = { 8.f, 20.f, 40.f };
+    SetDrawParams(mvp, world, vps, splits, material, lightDir, lightColor, intensity, ambient,
+                  receiveShadows, {0,2,0}, 1.0f);
 }
 
 void DX12Pipeline::DrawMesh(ID3D12GraphicsCommandList* cmdList, const std::string& name) {
