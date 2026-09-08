@@ -24,7 +24,7 @@ jobs:
           cmake -B build -G "Visual Studio 17 2022" -A x64 `
             -DMUK_USE_IMGUI=ON `
             -DMUK_USE_TINYGLTF=ON `
-            -DMUK_USE_JOLT=OFF `
+            -DMUK_USE_JOLT=ON `
             -DMUK_BUILD_SAMPLES=OFF
 
       - name: Build Release
@@ -47,40 +47,25 @@ jobs:
 
           Copy-Item README.md "$out/" -ErrorAction SilentlyContinue
           Copy-Item LICENSE "$out/" -ErrorAction SilentlyContinue
+          Copy-Item ROADMAP.md "$out/" -ErrorAction SilentlyContinue
 
           @"
-          # Muk user settings (DO NOT commit real keys)
-          # Copy to %APPDATA%\\MukGameEngine\\settings.json or next to the exe
-
           provider=openrouter
           openrouter_api_key=
           openrouter_model=openai/gpt-4o-mini
           nvidia_api_key=
-          nvidia_base_url=https://integrate.api.nvidia.com/v1
           openai_api_key=
-          openai_base_url=https://api.openai.com/v1
-          custom_api_key=
-          custom_base_url=
-          custom_model=
           "@ | Set-Content -Encoding utf8 "$out/config/settings.example.ini"
 
           @"
-          Muk Game Engine — Windows package
-          ==================================
+          Muk Game Engine v0.5 — Windows
+          ================================
+          bin\MukEditor.exe  — shadows, ImGuizmo (T/R/Y), WASD character, AI BYOK
+          bin\MukRuntime.exe — runtime loop
 
-          1. Run bin\\MukEditor.exe  (editor + viewport + AI panel)
-             or bin\\MukRuntime.exe (sandbox game loop)
-
-          2. API keys (Bring Your Own Key):
-             - Copy config\\settings.example.ini to:
-                 %APPDATA%\\MukGameEngine\\settings.ini
-             - Fill in openrouter_api_key / nvidia_api_key / openai_api_key
-             - Restart the editor; use the AI Control panel
-
-          3. Keys never leave your machine except to the provider you chose.
-
-          Status: early foundation (not full Unreal parity yet).
-          Roadmap targets Unreal-class rendering, tools, and AI-assisted workflows.
+          Character: WASD move, Space jump
+          Gizmo: select entity, T translate / R rotate / Y scale
+          Physics: Jolt when built with MUK_USE_JOLT=ON
           "@ | Set-Content -Encoding utf8 "$out/INSTALL.txt"
 
       - name: Upload artifact
@@ -92,5 +77,4 @@ jobs:
 
       - name: List binaries
         shell: pwsh
-        run: |
-          Get-ChildItem -Recurse build/bin -ErrorAction SilentlyContinue | Select-Object FullName
+        run: Get-ChildItem -Recurse build/bin -ErrorAction SilentlyContinue | Select-Object FullName
