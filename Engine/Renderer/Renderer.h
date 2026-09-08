@@ -4,6 +4,7 @@
 #include "RHI/RHI.h"
 #include "Mesh.h"
 #include "Material.h"
+#include "Texture.h"
 #include "Math/Matrix.h"
 #include "Math/Vector.h"
 #include <memory>
@@ -12,6 +13,7 @@
 namespace Muk {
 
 class DX12Pipeline;
+class DX12SceneRT;
 
 struct CameraView {
     Vec3 Eye{0.0f, 1.5f, -4.0f};
@@ -35,11 +37,19 @@ public:
     void OnResize(u32 width, u32 height);
 
     bool UploadMesh(const std::string& name, const Mesh& mesh);
+    bool UploadTexture(const std::string& name, const Texture& texture);
     void SetCamera(const CameraView& camera);
-    void DrawMesh(const std::string& meshName, const Mat4& world, const Material& material);
 
-    // Legacy overload
+    void DrawMesh(const std::string& meshName, const Mat4& world, const Material& material);
     void DrawMesh(const Mesh& mesh, const Mat4& transform, const Material& material);
+
+    // Editor viewport RTT
+    bool EnsureSceneRT(u32 width, u32 height);
+    void BeginSceneRT();
+    void EndSceneRT();
+    void* GetSceneRTGpuHandle() const; // D3D12_GPU_DESCRIPTOR_HANDLE as void* for ImGui
+    u32 GetSceneRTWidth() const;
+    u32 GetSceneRTHeight() const;
 
     RHI* GetRHI() const { return m_RHI.get(); }
     Mat4 GetViewProjection() const { return m_ViewProjection; }
@@ -49,11 +59,13 @@ private:
 
     std::unique_ptr<RHI> m_RHI;
     std::unique_ptr<DX12Pipeline> m_Pipeline;
+    std::unique_ptr<DX12SceneRT> m_SceneRT;
     CameraView m_Camera;
     Mat4 m_ViewProjection = Mat4::Identity();
     u32 m_Width = 1;
     u32 m_Height = 1;
     bool m_Initialized = false;
+    bool m_RenderingToSceneRT = false;
 };
 
 } // namespace Muk
