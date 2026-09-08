@@ -1,84 +1,97 @@
 # Muk Game Engine
 
-Modern C++20 / DirectX 12 engine.
+Modern C++20 / DirectX 12 game engine for Windows.
 
-> **v0.4** — GPU albedo SRVs + HLSL sampling, editor viewport render-to-texture.
+> **Honest status:** Early foundation (v0.4+). It is **not** full Unreal Engine yet.  
+> Goal: grow toward Unreal-class tools/rendering **and** AI-assisted workflows with **bring-your-own-keys**.
 
-**Repo**: https://github.com/JagX-JRILICENSE/MukGameEngine
-
----
-
-## v0.4 Features
-
-### GPU albedo textures + HLSL sampling
-- `DX12TextureCache` uploads RGBA8 → DEFAULT texture + SRV on shared heap
-- Root signature: **b0** CBV (MVP + BaseColor + UseTexture), **t0** albedo SRV, **s0** linear wrap sampler
-- Pixel shader: `lerp(vertexColor * BaseColor, albedoSample * BaseColor, UseTexture)`
-- `Renderer::UploadTexture` + automatic upload when `Material::AlbedoMap` is set
-- glTF albedo maps from `LoadGltfFull` can be uploaded the same way
-
-### Editor viewport render-to-texture
-- `DX12SceneRT` — offscreen color (RTV+SRV) + depth (DSV)
-- `Renderer::EnsureSceneRT` / `BeginSceneRT` / `EndSceneRT`
-- Scene draws into RTT; `ImGui::Image` shows GPU SRV in the **Viewport** panel
-- Resizes with the docked panel
-- After RTT: `BindSwapchainTargets()` so ImGui draws on the swapchain
+**Repo:** https://github.com/JagX-JRILICENSE/MukGameEngine
 
 ---
 
-## Build
+## Install on Windows (recommended)
 
-```bat
-scripts\build_windows.bat full
+### Option A — Download CI build (no local compile)
+
+1. Open **Actions** on GitHub → workflow **Windows Build**
+2. Open the latest successful run
+3. Download artifact **`MukGameEngine-Windows-x64`**
+4. Unzip → run `bin\MukEditor.exe` or `bin\MukRuntime.exe`
+
+Trigger a build yourself: **Actions → Windows Build → Run workflow**
+
+### Option B — Build locally
+
+```powershell
+git clone https://github.com/JagX-JRILICENSE/MukGameEngine.git
+cd MukGameEngine
+./scripts/build_windows.ps1 -Full
+./scripts/package_windows.ps1
 ```
 
-or
-
-```bash
-cmake .. -G "Visual Studio 17 2022" -A x64 ^
-  -DMUK_USE_IMGUI=ON -DMUK_USE_JOLT=ON -DMUK_USE_TINYGLTF=ON
-cmake --build . --config Release
-```
-
-**MukEditor** (with ImGui): textured triangle in the Viewport panel (SceneRT).  
-**MukRuntime**: triangle + cube on the main swapchain with camera MVP.
+Requires: Windows 10/11, VS 2022 (C++), CMake 3.25+, Git
 
 ---
 
-## API sketch
+## Realtime preview (what you get today)
 
-```cpp
-// Upload glTF albedo to GPU
-auto r = Assets().LoadGltfFull("Assets/model.glb");
-if (r.Success) {
-    Renderer().UploadMesh("model", *r.MeshData);
-    if (r.MaterialData && r.MaterialData->AlbedoMap)
-        Renderer().UploadTexture(r.MaterialData->AlbedoTexture, *r.MaterialData->AlbedoMap);
-    Renderer().DrawMesh("model", Mat4::Identity(), *r.MaterialData);
-}
+| App | What you see |
+|-----|----------------|
+| **MukEditor** | Docked UI, **Viewport** with live SceneRT (triangle + cube, depth, textured demo), Hierarchy/Details, **AI Control** panel |
+| **MukRuntime** | Game-style loop: camera MVP, multi-mesh, physics step |
 
-// Editor viewport
-Renderer().EnsureSceneRT(panelW, panelH);
-Renderer().BeginSceneRT();
-// ... DrawMesh calls ...
-Renderer().EndSceneRT();
-ImGui::Image(Renderer().GetSceneRTGpuHandle(), size);
-```
+This is a **working realtime DX12 loop**, not a static mockup.
 
 ---
 
-## Layout
+## Bring Your Own API Key (BYOK)
 
-```
-RHI/DX12/
-  DX12RHI        swapchain, depth, SRV heap (128)
-  DX12Pipeline   mesh cache, textured PSO
-  DX12Texture    albedo GPU upload
-  DX12SceneRT    editor viewport RTT
-Renderer/        CameraView, UploadTexture, SceneRT API
-EditorUI/        Viewport ImGui::Image(SceneRT)
-```
+Control / advise the engine with **your** keys — no vendor lock-in.
+
+Supported providers (OpenAI-compatible):
+
+- **OpenRouter**
+- **NVIDIA** Integrate API (`integrate.api.nvidia.com`)
+- **OpenAI**
+- **Custom** base URL + key + model
+
+### Setup
+
+1. Copy `config/settings.example.ini` → `%APPDATA%\MukGameEngine\settings.ini`
+2. Set e.g. `provider=openrouter` and `openrouter_api_key=sk-or-...`
+3. Or paste the key in the editor **AI Control (BYOK)** panel and **Save settings**
+
+Keys stay on your machine; requests go only to the provider you choose.
+
+### AI Control panel
+
+- Chat with the model about systems / levels / code
+- Model can emit `ACTION: set_camera eye=... target=...` to move the live camera
+- More actions (spawn, materials, etc.) will expand over time
 
 ---
 
-MIT — **Muk Game Engine**
+## What works now vs Unreal
+
+| Area | Muk today | Unreal |
+|------|-----------|--------|
+| DX12 triangle/cube, depth, textures | Yes | Yes |
+| Editor docking + viewport RTT | Yes (early) | Full |
+| Physics | Simple (+ optional Jolt path) | Chaos |
+| glTF | Mesh + material + CPU/GPU albedo path | Full pipeline |
+| Blueprints / sequencer / Nanite / Lumen | Not yet | Yes |
+| BYOK AI control | Yes (early) | Plugins / external |
+
+Roadmap aims at high-end rendering, full editor, animation, audio, networking, **and** deeper AI actions.
+
+---
+
+## CI
+
+`.github/workflows/windows-build.yml` builds Release on `windows-latest` with ImGui + tinygltf and uploads a zip-ready artifact.
+
+---
+
+## License
+
+MIT
