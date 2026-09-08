@@ -99,8 +99,6 @@ target_include_directories(MukEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
     target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler winhttp shell32 ole32)
-    # XAudio2 is part of Windows SDK; link if available
-    target_link_libraries(MukEngine PUBLIC xaudio2)
 endif()
 
 if(MUK_USE_IMGUI)
