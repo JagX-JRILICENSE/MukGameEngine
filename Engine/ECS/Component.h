@@ -4,28 +4,48 @@
 #include "Math/Vector.h"
 #include "Math/Matrix.h"
 #include <string>
+#include <cmath>
 
 namespace Muk {
 
-// Base marker for components
 struct IComponent {
     virtual ~IComponent() = default;
 };
 
 struct Transform : public IComponent {
     Vec3 Position{0.0f, 0.0f, 0.0f};
-    Vec3 Rotation{0.0f, 0.0f, 0.0f}; // Euler for now
+    Vec3 Rotation{0.0f, 0.0f, 0.0f}; // Euler degrees XYZ
     Vec3 Scale{1.0f, 1.0f, 1.0f};
 
     Mat4 GetMatrix() const {
-        // Simple composition: T * R * S (rotation not fully implemented yet)
-        return Mat4::Translation(Position) * Mat4::Scale(Scale);
+        // T * Rz * Ry * Rx * S (degrees)
+        const f32 deg2rad = 0.01745329251f;
+        f32 rx = Rotation.x * deg2rad;
+        f32 ry = Rotation.y * deg2rad;
+        f32 rz = Rotation.z * deg2rad;
+
+        Mat4 S = Mat4::Scale(Scale);
+
+        Mat4 Rx = Mat4::Identity();
+        Rx.m[5] = std::cos(rx); Rx.m[6] = -std::sin(rx);
+        Rx.m[9] = std::sin(rx); Rx.m[10] = std::cos(rx);
+
+        Mat4 Ry = Mat4::Identity();
+        Ry.m[0] = std::cos(ry); Ry.m[2] = std::sin(ry);
+        Ry.m[8] = -std::sin(ry); Ry.m[10] = std::cos(ry);
+
+        Mat4 Rz = Mat4::Identity();
+        Rz.m[0] = std::cos(rz); Rz.m[1] = -std::sin(rz);
+        Rz.m[4] = std::sin(rz); Rz.m[5] = std::cos(rz);
+
+        return Mat4::Translation(Position) * Rz * Ry * Rx * S;
     }
 };
 
 struct MeshRenderer : public IComponent {
-    std::string MeshName = "Cube";      // Looked up in AssetManager
+    std::string MeshName = "Cube";
     std::string MaterialName = "Default";
+    bool Visible = true;
 };
 
 struct Camera : public IComponent {
@@ -35,10 +55,20 @@ struct Camera : public IComponent {
     bool Primary = true;
 };
 
-/** Links an entity to a physics body in PhysicsWorld */
+struct DirectionalLight : public IComponent {
+    Vec3 Direction{0.3f, -1.0f, 0.2f}; // will be normalized in renderer
+    Vec3 Color{1.0f, 0.98f, 0.95f};
+    f32 Intensity = 1.2f;
+    f32 Ambient = 0.15f;
+};
+
 struct RigidBodyComponent : public IComponent {
-    EntityID BodyId = 0;  // Handle returned by PhysicsWorld::CreateBody
-    bool SyncTransform = true; // Write physics position back to Transform each frame
+    EntityID BodyId = 0;
+    bool SyncTransform = true;
+};
+
+struct NameComponent : public IComponent {
+    std::string Name = "Entity";
 };
 
 } // namespace Muk
