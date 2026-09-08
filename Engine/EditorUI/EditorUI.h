@@ -16,6 +16,7 @@ struct EditorEntityInfo {
 };
 
 class DX12RHI;
+class Renderer;
 
 class EditorUI {
 public:
@@ -23,7 +24,6 @@ public:
     void Shutdown();
 
     void BeginFrame();
-    // Call after scene draws, before RHI EndFrame - records ImGui into cmd list
     void RenderDrawData();
     void EndFrame();
 
@@ -32,21 +32,23 @@ public:
     void DrawDetails(World& world, Entity selected);
     void DrawContentBrowser();
     void DrawConsole();
-    void DrawViewportPlaceholder();
+
+    // Returns desired viewport size; call EnsureSceneRT + render scene before Image
+    void DrawViewport(Renderer& renderer, void* sceneRtGpuHandle, u32 rtW, u32 rtH);
+
+    u32 GetDesiredViewportWidth() const { return m_ViewportW; }
+    u32 GetDesiredViewportHeight() const { return m_ViewportH; }
 
     bool IsInitialized() const { return m_Initialized; }
-    bool WantsCaptureMouse() const { return m_WantsCaptureMouse; }
-    bool WantsCaptureKeyboard() const { return m_WantsCaptureKeyboard; }
-
     void Log(const std::string& message);
 
 private:
     bool m_Initialized = false;
     bool m_ImGuiDx12 = false;
-    bool m_WantsCaptureMouse = false;
-    bool m_WantsCaptureKeyboard = false;
     DX12RHI* m_RHI = nullptr;
     std::vector<std::string> m_ConsoleLines;
+    u32 m_ViewportW = 800;
+    u32 m_ViewportH = 450;
     static constexpr size_t MaxConsoleLines = 200;
 };
 
