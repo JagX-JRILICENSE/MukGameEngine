@@ -1,23 +1,18 @@
 # Muk Roadmap
 
-## Done (v0.7)
+## Done (v0.8)
 
-- Per-pixel cascade selection (3 VPs + splits)
-- Soft PCF, IBL hemisphere, Reinhard exposure
-- Skeleton / AnimationClip / Animator (demo Wave)
-- Spatial audio tones (XAudio2)
-- Content Browser import/reimport
-- JSON scene save/load
-- Component reflection Details UI
-- AI Game Builder agent (plan/build/preview/verify/fix)
-- Richer AI ACTIONs (spawn, material, select, focus, sound)
+- Multi-agent team: Architect / Builder / Scripter / Critic
+- Dual provider: OpenRouter + NVIDIA collaboration
+- Muk Script VM: on_start, on_update, if/then, move, levels, UI, win/lose
+- Multi-level GameRuntime + load_level
+- Full pipeline: design → scene → script → UI → preview → verify → fix → playtest
+- Prior: cascades, animation, audio, content browser, scenes, reflection, IBL
 
-## Next
+## Next polish
 
-1. GPU skinning in VS
-2. Real WAV load + XAudio source voices
-3. Full post stack (bloom mip chain)
-4. Cubemap IBL
-5. Stronger scene JSON + prefabs
-6. AI multi-step gameplay scripting
-7. Mouse-driven AI “cursor” in viewport overlay
+1. Trigger volumes (orb collect distance checks in VM)
+2. Async AI calls (non-blocking Tick)
+3. Save generated scripts/levels to Assets/
+4. GPU skinning
+5. Bloom + cubemap IBL
