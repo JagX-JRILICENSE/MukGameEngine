@@ -9,6 +9,7 @@ lib/
 *.ilk
 *.exp
 *.lib
+MukGameEngine-Windows-x64/
 
 # IDE
 .vs/
@@ -28,6 +29,12 @@ cmake_install.cmake
 Makefile
 *.cmake
 !CMakeLists.txt
+
+# Secrets / local settings (BYOK)
+config/settings.ini
+**/settings.ini
+.env
+.env.*
 
 # Logs
 *.log
