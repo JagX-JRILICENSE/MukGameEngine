@@ -1,6 +1,5 @@
 #include "DX12Pipeline.h"
 #include "Core/Log.h"
-
 #include <d3dcompiler.h>
 #include <cstring>
 
@@ -12,7 +11,14 @@ static const char* g_EmbeddedHLSL = R"(
 cbuffer FrameConstants : register(b0)
 {
     float4x4 MVP;
+    float4   BaseColor;
+    float    UseTexture;
+    float3   Pad;
 };
+
+Texture2D    AlbedoTex : register(t0);
+SamplerState AlbedoSam : register(s0);
+
 struct VSInput {
     float3 Position : POSITION;
     float3 Normal   : NORMAL;
@@ -24,6 +30,7 @@ struct PSInput {
     float4 Color    : COLOR;
     float2 TexCoord : TEXCOORD;
 };
+
 PSInput VSMain(VSInput input) {
     PSInput o;
     o.Position = mul(float4(input.Position, 1.0f), MVP);
@@ -31,18 +38,23 @@ PSInput VSMain(VSInput input) {
     o.TexCoord = input.TexCoord;
     return o;
 }
+
 float4 PSMain(PSInput input) : SV_TARGET {
-    return input.Color;
+    float4 tex = AlbedoTex.Sample(AlbedoSam, input.TexCoord);
+    float4 color = lerp(input.Color * BaseColor, tex * BaseColor, UseTexture);
+    return color;
 }
 )";
 
-bool DX12Pipeline::Initialize(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_FORMAT depthFormat) {
+bool DX12Pipeline::Initialize(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_FORMAT depthFormat,
+                              ID3D12DescriptorHeap* srvHeap, u32 srvSize, u32* srvNext, u32 srvMax) {
     if (!CreateRootSignature(device)) return false;
     if (!CreatePipelineState(device, rtvFormat, depthFormat)) return false;
 
+    m_Textures.Initialize(device, srvHeap, srvSize, srvNext, srvMax);
+
     D3D12_HEAP_PROPERTIES heapProps = {};
     heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-
     D3D12_RESOURCE_DESC cbDesc = {};
     cbDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
     cbDesc.Width = 256;
@@ -52,18 +64,17 @@ bool DX12Pipeline::Initialize(ID3D12Device* device, DXGI_FORMAT rtvFormat, DXGI_
     cbDesc.SampleDesc.Count = 1;
     cbDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-    if (FAILED(device->CreateCommittedResource(
-            &heapProps, D3D12_HEAP_FLAG_NONE, &cbDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-            IID_PPV_ARGS(&m_ConstantBuffer))))
+    if (FAILED(device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &cbDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&m_ConstantBuffer))))
         return false;
 
     m_ConstantBuffer->Map(0, nullptr, &m_CBMapped);
-    Mat4 identity = Mat4::Identity();
-    std::memcpy(m_CBMapped, identity.m, sizeof(float) * 16);
+    FrameCB cb = {};
+    cb.BaseColor[0] = cb.BaseColor[1] = cb.BaseColor[2] = cb.BaseColor[3] = 1.0f;
+    std::memcpy(m_CBMapped, &cb, sizeof(FrameCB));
 
     m_Ready = true;
-    MUK_CORE_INFO("DX12Pipeline ready (depth test + multi-mesh cache)");
+    MUK_CORE_INFO("DX12Pipeline ready (textured + depth + mesh cache)");
     return true;
 }
 
@@ -72,6 +83,7 @@ void DX12Pipeline::Shutdown() {
         m_ConstantBuffer->Unmap(0, nullptr);
         m_CBMapped = nullptr;
     }
+    m_Textures.Shutdown();
     m_MeshCache.clear();
     m_ConstantBuffer.Reset();
     m_PipelineState.Reset();
@@ -80,20 +92,44 @@ void DX12Pipeline::Shutdown() {
 }
 
 bool DX12Pipeline::CreateRootSignature(ID3D12Device* device) {
-    D3D12_ROOT_PARAMETER rootParam = {};
-    rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    rootParam.Descriptor.ShaderRegister = 0;
-    rootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+    // b0 = CBV, t0 = SRV table, s0 = static sampler
+    D3D12_DESCRIPTOR_RANGE srvRange = {};
+    srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvRange.NumDescriptors = 1;
+    srvRange.BaseShaderRegister = 0;
+    srvRange.RegisterSpace = 0;
+    srvRange.OffsetInDescriptorsFromTableStart = 0;
+
+    D3D12_ROOT_PARAMETER params[2] = {};
+    params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    params[0].Descriptor.ShaderRegister = 0;
+    params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    params[1].DescriptorTable.NumDescriptorRanges = 1;
+    params[1].DescriptorTable.pDescriptorRanges = &srvRange;
+    params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+    D3D12_STATIC_SAMPLER_DESC sampler = {};
+    sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    sampler.ShaderRegister = 0;
+    sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
-    rsDesc.NumParameters = 1;
-    rsDesc.pParameters = &rootParam;
+    rsDesc.NumParameters = 2;
+    rsDesc.pParameters = params;
+    rsDesc.NumStaticSamplers = 1;
+    rsDesc.pStaticSamplers = &sampler;
     rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
     ComPtr<ID3DBlob> signature, error;
-    if (FAILED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error)))
+    if (FAILED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error))) {
+        if (error) MUK_CORE_ERROR("RS error: {0}", (const char*)error->GetBufferPointer());
         return false;
-
+    }
     return SUCCEEDED(device->CreateRootSignature(0, signature->GetBufferPointer(),
                       signature->GetBufferSize(), IID_PPV_ARGS(&m_RootSignature)));
 }
@@ -133,15 +169,11 @@ bool DX12Pipeline::CreatePipelineState(ID3D12Device* device, DXGI_FORMAT rtvForm
     psoDesc.SampleMask = UINT_MAX;
     psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
     psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
-    psoDesc.RasterizerState.FrontCounterClockwise = FALSE;
     psoDesc.RasterizerState.DepthClipEnable = TRUE;
-
-    // Depth test ON
     psoDesc.DepthStencilState.DepthEnable = TRUE;
     psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
     psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     psoDesc.DSVFormat = depthFormat;
-
     psoDesc.InputLayout = { inputLayout, _countof(inputLayout) };
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
@@ -157,7 +189,6 @@ bool DX12Pipeline::HasMesh(const std::string& name) const {
 
 bool DX12Pipeline::UploadMesh(ID3D12Device* device, const std::string& name, const Mesh& mesh) {
     if (HasMesh(name)) return true;
-
     const auto& vertices = mesh.GetVertices();
     const auto& indices = mesh.GetIndices();
     if (vertices.empty() || indices.empty()) return false;
@@ -168,7 +199,6 @@ bool DX12Pipeline::UploadMesh(ID3D12Device* device, const std::string& name, con
 
     D3D12_HEAP_PROPERTIES uploadHeap = {};
     uploadHeap.Type = D3D12_HEAP_TYPE_UPLOAD;
-
     D3D12_RESOURCE_DESC bufDesc = {};
     bufDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
     bufDesc.Height = 1;
@@ -181,12 +211,10 @@ bool DX12Pipeline::UploadMesh(ID3D12Device* device, const std::string& name, con
     if (FAILED(device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
             D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&gpu->VertexBuffer))))
         return false;
-
     void* mapped = nullptr;
     gpu->VertexBuffer->Map(0, nullptr, &mapped);
     std::memcpy(mapped, vertices.data(), (size_t)vbSize);
     gpu->VertexBuffer->Unmap(0, nullptr);
-
     gpu->VBV.BufferLocation = gpu->VertexBuffer->GetGPUVirtualAddress();
     gpu->VBV.SizeInBytes = (UINT)vbSize;
     gpu->VBV.StrideInBytes = sizeof(Vertex);
@@ -195,19 +223,20 @@ bool DX12Pipeline::UploadMesh(ID3D12Device* device, const std::string& name, con
     if (FAILED(device->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &bufDesc,
             D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&gpu->IndexBuffer))))
         return false;
-
     gpu->IndexBuffer->Map(0, nullptr, &mapped);
     std::memcpy(mapped, indices.data(), (size_t)ibSize);
     gpu->IndexBuffer->Unmap(0, nullptr);
-
     gpu->IBV.BufferLocation = gpu->IndexBuffer->GetGPUVirtualAddress();
     gpu->IBV.SizeInBytes = (UINT)ibSize;
     gpu->IBV.Format = DXGI_FORMAT_R32_UINT;
     gpu->IndexCount = (u32)indices.size();
 
     m_MeshCache[name] = std::move(gpu);
-    MUK_CORE_INFO("GPU mesh cached: {0} ({1} verts)", name.c_str(), (int)vertices.size());
     return true;
+}
+
+bool DX12Pipeline::UploadTexture(ID3D12Device* device, const std::string& name, const Texture& tex) {
+    return m_Textures.Upload(device, nullptr, nullptr, name, tex);
 }
 
 void DX12Pipeline::Bind(ID3D12GraphicsCommandList* cmdList) {
@@ -215,17 +244,34 @@ void DX12Pipeline::Bind(ID3D12GraphicsCommandList* cmdList) {
     cmdList->SetPipelineState(m_PipelineState.Get());
     cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->SetGraphicsRootConstantBufferView(0, m_ConstantBuffer->GetGPUVirtualAddress());
+    // Default white texture
+    cmdList->SetGraphicsRootDescriptorTable(1, m_Textures.GetWhiteSrv());
 }
 
-void DX12Pipeline::SetMVP(const Mat4& mvp) {
-    if (m_CBMapped)
-        std::memcpy(m_CBMapped, mvp.m, sizeof(float) * 16);
+void DX12Pipeline::SetMaterialParams(const Mat4& mvp, const Material& material) {
+    if (!m_CBMapped) return;
+    FrameCB cb = {};
+    std::memcpy(cb.MVP, mvp.m, sizeof(float) * 16);
+    cb.BaseColor[0] = material.BaseColor.x;
+    cb.BaseColor[1] = material.BaseColor.y;
+    cb.BaseColor[2] = material.BaseColor.z;
+    cb.BaseColor[3] = material.BaseColor.w;
+
+    bool hasTex = false;
+    if (material.AlbedoMap && material.AlbedoMap->IsValid()) {
+        std::string key = material.AlbedoTexture.empty() ? material.AlbedoMap->Name : material.AlbedoTexture;
+        if (m_Textures.Has(key) || true) {
+            // Upload on demand if needed is done by Renderer
+            hasTex = m_Textures.Has(key);
+        }
+    }
+    cb.UseTexture = hasTex ? 1.0f : 0.0f;
+    std::memcpy(m_CBMapped, &cb, sizeof(FrameCB));
 }
 
 void DX12Pipeline::DrawMesh(ID3D12GraphicsCommandList* cmdList, const std::string& name) {
     auto it = m_MeshCache.find(name);
     if (it == m_MeshCache.end()) return;
-
     auto& gpu = *it->second;
     cmdList->IASetVertexBuffers(0, 1, &gpu.VBV);
     cmdList->IASetIndexBuffer(&gpu.IBV);
