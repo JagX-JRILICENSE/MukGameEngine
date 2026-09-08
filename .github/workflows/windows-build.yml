@@ -14,7 +14,7 @@ jobs:
   build:
     name: Build Muk (Windows x64)
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
@@ -25,47 +25,78 @@ jobs:
         with:
           arch: x64
 
-      - name: Configure CMake (ImGui + tinygltf, no Jolt — stable)
+      - name: Show toolchain
         shell: pwsh
         run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DMUK_USE_IMGUI=ON `
-            -DMUK_USE_TINYGLTF=ON `
-            -DMUK_USE_JOLT=OFF `
-            -DMUK_BUILD_SAMPLES=OFF `
-            -DMUK_BUILD_EDITOR=ON
+          cmake --version
+          where cl
+          Write-Host "VSINSTALLDIR=$env:VSINSTALLDIR"
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          # Prefer default generator detected by CMake (VS 2022/2025)
+          $args = @(
+            "-B", "build",
+            "-A", "x64",
+            "-DMUK_USE_IMGUI=ON",
+            "-DMUK_USE_TINYGLTF=ON",
+            "-DMUK_USE_JOLT=OFF",
+            "-DMUK_BUILD_SAMPLES=OFF",
+            "-DMUK_BUILD_EDITOR=ON"
+          )
+          Write-Host "cmake $($args -join ' ')"
+          & cmake @args
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Retry with explicit VS 17 2022…"
+            & cmake -B build -G "Visual Studio 17 2022" -A x64 `
+              -DMUK_USE_IMGUI=ON -DMUK_USE_TINYGLTF=ON -DMUK_USE_JOLT=OFF `
+              -DMUK_BUILD_SAMPLES=OFF -DMUK_BUILD_EDITOR=ON
+          }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Retry Ninja…"
+            choco install ninja -y --no-progress
+            & cmake -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release `
+              -DMUK_USE_IMGUI=ON -DMUK_USE_TINYGLTF=ON -DMUK_USE_JOLT=OFF `
+              -DMUK_BUILD_SAMPLES=OFF -DMUK_BUILD_EDITOR=ON
+            if ($LASTEXITCODE -eq 0) {
+              "USE_NINJA=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            }
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Release
         shell: pwsh
         run: |
-          cmake --build build --config Release --parallel 4 -- /m /v:minimal
+          if ($env:USE_NINJA -eq "1") {
+            cmake --build build-ninja --parallel 4
+          } else {
+            cmake --build build --config Release --parallel 4
+          }
 
       - name: Locate binaries
         id: bins
         shell: pwsh
         run: |
-          $candidates = @(
-            "build/bin/Release",
-            "build/Release",
-            "build/bin",
-            "build/Editor/Release",
-            "build/Runtime/Release"
-          )
+          $roots = @("build", "build-ninja")
           $foundEditor = $null
           $foundRuntime = $null
-          foreach ($d in $candidates) {
-            if (Test-Path "$d/MukEditor.exe") { $foundEditor = (Resolve-Path "$d/MukEditor.exe").Path }
-            if (Test-Path "$d/MukRuntime.exe") { $foundRuntime = (Resolve-Path "$d/MukRuntime.exe").Path }
+          foreach ($root in $roots) {
+            if (-not (Test-Path $root)) { continue }
+            Get-ChildItem -Path $root -Recurse -Filter "MukEditor.exe" -ErrorAction SilentlyContinue |
+              ForEach-Object { if (-not $foundEditor) { $foundEditor = $_.FullName } }
+            Get-ChildItem -Path $root -Recurse -Filter "MukRuntime.exe" -ErrorAction SilentlyContinue |
+              ForEach-Object { if (-not $foundRuntime) { $foundRuntime = $_.FullName } }
+            # Also match renamed output
+            Get-ChildItem -Path $root -Recurse -Filter "Muk Game Engine.exe" -ErrorAction SilentlyContinue |
+              ForEach-Object { if (-not $foundEditor) { $foundEditor = $_.FullName } }
           }
-          Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue |
+          Get-ChildItem -Path build,build-ninja -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue |
             ForEach-Object { Write-Host $_.FullName }
           if (-not $foundEditor) {
             Write-Error "MukEditor.exe not found after build"
             exit 1
           }
-          Write-Host "EDITOR=$foundEditor"
-          Write-Host "RUNTIME=$foundRuntime"
           "editor=$foundEditor" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           if ($foundRuntime) {
             "runtime=$foundRuntime" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -77,15 +108,22 @@ jobs:
           $out = "MukGameEngine-Windows-x64"
           New-Item -ItemType Directory -Force -Path "$out/bin" | Out-Null
           New-Item -ItemType Directory -Force -Path "$out/config" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$out/Assets/Scripts" | Out-Null
 
           $editor = "${{ steps.bins.outputs.editor }}"
           $runtime = "${{ steps.bins.outputs.runtime }}"
           Copy-Item $editor "$out/bin/MukEditor.exe" -Force
+          # Friendly name copy
+          Copy-Item $editor "$out/bin/Muk Game Engine.exe" -Force
           if ($runtime) { Copy-Item $runtime "$out/bin/MukRuntime.exe" -Force }
 
           $editorDir = Split-Path $editor -Parent
           Get-ChildItem $editorDir -Filter "*.dll" -ErrorAction SilentlyContinue |
             Copy-Item -Destination "$out/bin/" -Force
+
+          if (Test-Path "Resources/muk.ico") {
+            Copy-Item "Resources/muk.ico" "$out/bin/" -Force
+          }
 
           Copy-Item README.md "$out/" -ErrorAction SilentlyContinue
           Copy-Item LICENSE "$out/" -ErrorAction SilentlyContinue
@@ -95,43 +133,15 @@ jobs:
           }
 
           @"
-          # Muk BYOK — free models (Sep 2026)
-          # Get keys:
-          #   OpenRouter: https://openrouter.ai/keys  (free models use :free suffix)
-          #   NVIDIA:     https://build.nvidia.com    (Get API Key on any model)
-
-          provider=openrouter
-
-          openrouter_api_key=
-          openrouter_model=nvidia/nemotron-3.5-lightning:free
-          openrouter_base_url=https://openrouter.ai/api/v1
-
-          nvidia_api_key=
-          nvidia_model=meta/llama-3.1-8b-instruct
-          nvidia_base_url=https://integrate.api.nvidia.com/v1
-
-          openai_api_key=
-          openai_model=gpt-4o-mini
-          openai_base_url=https://api.openai.com/v1
-          "@ | Set-Content -Encoding utf8 "$out/config/settings.example.ini"
-
-          @"
           Muk Game Engine — Windows x64
           =============================
-          1. Run bin\MukEditor.exe
-          2. AI free models:
-             - OpenRouter: paste key from openrouter.ai → pick a :free model in AI panel
-             - NVIDIA: paste nvapi- key from build.nvidia.com → free endpoint models
-          3. Copy config\settings.example.ini to %APPDATA%\MukGameEngine\settings.ini
+          Run: bin\Muk Game Engine.exe  (or MukEditor.exe)
 
-          F5 = Play-In-Editor | Ctrl+Z undo | WASD character | T/R/Y gizmo
+          AI: set OpenRouter + NVIDIA keys in AI Control panel
+          F5 Play-In-Editor | F9 reload script | F12 screenshot
           "@ | Set-Content -Encoding utf8 "$out/INSTALL.txt"
 
-          if (-not (Test-Path "$out/bin/MukEditor.exe")) {
-            Write-Error "Package missing MukEditor.exe"
-            exit 1
-          }
-          Write-Host "Package OK"
+          if (-not (Test-Path "$out/bin/MukEditor.exe")) { exit 1 }
           Get-ChildItem -Recurse $out | Select-Object FullName, Length
 
       - name: Upload Windows app artifact
@@ -141,22 +151,3 @@ jobs:
           path: MukGameEngine-Windows-x64
           if-no-files-found: error
           retention-days: 30
-
-  # Optional heavier build with Jolt (does not block the main artifact)
-  build-jolt:
-    name: Build with Jolt (optional)
-    runs-on: windows-latest
-    timeout-minutes: 90
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-      - name: Configure + build with Jolt
-        shell: pwsh
-        run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64 `
-            -DMUK_USE_IMGUI=ON -DMUK_USE_TINYGLTF=ON -DMUK_USE_JOLT=ON `
-            -DMUK_BUILD_SAMPLES=OFF
-          cmake --build build --config Release --parallel 4
