@@ -1,21 +1,17 @@
 # Muk Roadmap
 
-## Done (v0.9)
+## Done (v0.10)
 
-- CI cmake fix (CMP0169, flexible generator, samples off by default)
-- Distance proximity triggers for pickups
-- Async AI worker thread
-- Autosave scripts under Assets/Scripts
-- Input action mapping
-- Prefab registry
-- Screenshot TGA capture (F12)
-- Script hot-reload (F9)
-- App name + VERSIONINFO branding
+- Fully async multi-agent AI
+- SceneRT GPU screenshots (F12)
+- Collectible + Collector components
+- Particle system bursts
+- AI script/level autosave + Content Browser `.muk`
 
 ## Next
 
-1. GPU readback screenshots from SceneRT
-2. Custom .ico embedded in exe
-3. Wire AIGameAgent fully to AsyncAI for every phase
-4. Nav / AI pathfinding
-5. Particle system
+1. Custom embedded `.ico`
+2. Navmesh / pathfinding
+3. Undo batch for AI spawns
+4. Bloom + cubemap IBL
+5. GPU skinning
