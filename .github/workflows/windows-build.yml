@@ -9,12 +9,13 @@ on:
 
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 4
+  GIT_TERMINAL_PROMPT: 0
 
 jobs:
   build:
     name: Build Muk (Windows x64)
-    runs-on: windows-latest
-    timeout-minutes: 120
+    runs-on: windows-2022
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -29,38 +30,60 @@ jobs:
         shell: pwsh
         run: |
           cmake --version
-          where.exe cl 2>$null
-          where.exe cmake 2>$null
+          where.exe cl
+          where.exe cmake
+          cl 2>&1 | Select-Object -First 3
+
+      - name: Install Ninja
+        shell: pwsh
+        run: |
+          choco install ninja -y --no-progress
+          ninja --version
 
       - name: Configure CMake
         shell: pwsh
         run: |
-          $common = @(
-            "-DMUK_USE_IMGUI=ON",
-            "-DMUK_USE_TINYGLTF=ON",
-            "-DMUK_USE_JOLT=OFF",
-            "-DMUK_BUILD_SAMPLES=OFF",
-            "-DMUK_BUILD_EDITOR=ON"
-          )
-          $ok = $false
-          foreach ($gen in @("Visual Studio 17 2022", "Visual Studio 18 2025", "Visual Studio 16 2019")) {
-            Write-Host "Trying generator: $gen"
+          $ErrorActionPreference = "Continue"
+          git config --global core.longpaths true
+
+          function Invoke-Configure([string[]]$extra) {
             if (Test-Path build) { Remove-Item -Recurse -Force build }
-            & cmake -B build -G $gen -A x64 @common
-            if ($LASTEXITCODE -eq 0) { $ok = $true; "GENERATOR=$gen" | Out-File $env:GITHUB_ENV -Append -Encoding utf8; break }
+            $args = @(
+              "-B", "build",
+              "-G", "Ninja",
+              "-DCMAKE_BUILD_TYPE=Release",
+              "-DCMAKE_C_COMPILER=cl",
+              "-DCMAKE_CXX_COMPILER=cl",
+              "-DMUK_BUILD_SAMPLES=OFF",
+              "-DMUK_BUILD_EDITOR=ON",
+              "-DMUK_USE_JOLT=OFF"
+            ) + $extra
+            Write-Host "cmake $($args -join ' ')"
+            & cmake @args
+            return ($LASTEXITCODE -eq 0)
+          }
+
+          # Attempt 1: full features (ImGui + tinygltf)
+          $ok = Invoke-Configure @("-DMUK_USE_IMGUI=ON", "-DMUK_USE_TINYGLTF=ON")
+          if (-not $ok) {
+            Write-Host "Full configure failed — retry without FetchContent deps"
+            $ok = Invoke-Configure @("-DMUK_USE_IMGUI=OFF", "-DMUK_USE_TINYGLTF=OFF")
           }
           if (-not $ok) {
-            Write-Host "Falling back to Ninja"
-            choco install ninja -y --no-progress
+            Write-Host "Ninja failed — try VS 17 2022 generator"
             if (Test-Path build) { Remove-Item -Recurse -Force build }
-            & cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release @common
-            if ($LASTEXITCODE -eq 0) {
-              $ok = $true
-              "USE_NINJA=1" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-            }
+            & cmake -B build -G "Visual Studio 17 2022" -A x64 `
+              -DMUK_USE_IMGUI=OFF -DMUK_USE_TINYGLTF=OFF -DMUK_USE_JOLT=OFF `
+              -DMUK_BUILD_SAMPLES=OFF -DMUK_BUILD_EDITOR=ON
+            $ok = ($LASTEXITCODE -eq 0)
+            if ($ok) { "USE_VS=1" | Out-File $env:GITHUB_ENV -Append -Encoding utf8 }
+          } else {
+            "USE_NINJA=1" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           }
           if (-not $ok) {
-            Write-Error "CMake configure failed for all generators"
+            if (Test-Path build/CMakeFiles/CMakeOutput.log) { Get-Content build/CMakeFiles/CMakeOutput.log -Tail 80 }
+            if (Test-Path build/CMakeFiles/CMakeError.log) { Get-Content build/CMakeFiles/CMakeError.log -Tail 80 }
+            Write-Error "CMake configure failed"
             exit 1
           }
           Write-Host "Configure OK"
@@ -68,11 +91,12 @@ jobs:
       - name: Build Release
         shell: pwsh
         run: |
-          if ($env:USE_NINJA -eq "1") {
-            cmake --build build --parallel 4
-          } else {
+          if ($env:USE_VS -eq "1") {
             cmake --build build --config Release --parallel 4
+          } else {
+            cmake --build build --parallel 4
           }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Locate binaries
         id: bins
@@ -85,11 +109,18 @@ jobs:
           Get-ChildItem -Path build -Recurse -Filter "MukRuntime.exe" -ErrorAction SilentlyContinue |
             ForEach-Object { if (-not $foundRuntime) { $foundRuntime = $_.FullName } }
           Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue |
-            ForEach-Object { Write-Host $_.FullName }
+            ForEach-Object { Write-Host "EXE: $($_.FullName)" }
+          if (-not $foundEditor) {
+            # accept any editor-named fallback
+            $any = Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match "Muk|Editor" } | Select-Object -First 1
+            if ($any) { $foundEditor = $any.FullName }
+          }
           if (-not $foundEditor) {
             Write-Error "MukEditor.exe not found"
             exit 1
           }
+          Write-Host "Editor: $foundEditor"
           "editor=$foundEditor" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
           if ($foundRuntime) { "runtime=$foundRuntime" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8 }
 
@@ -97,7 +128,7 @@ jobs:
         shell: pwsh
         run: |
           $out = "MukGameEngine-Windows-x64"
-          New-Item -ItemType Directory -Force -Path "$out/bin","$out/config","$out/Assets/Scripts" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$out/bin","$out/config","$out/Assets/Scripts","$out/Assets/Scenes" | Out-Null
           $editor = "${{ steps.bins.outputs.editor }}"
           $runtime = "${{ steps.bins.outputs.runtime }}"
           Copy-Item $editor "$out/bin/MukEditor.exe" -Force
@@ -106,9 +137,17 @@ jobs:
           $dir = Split-Path $editor -Parent
           Get-ChildItem $dir -Filter "*.dll" -ErrorAction SilentlyContinue | Copy-Item -Destination "$out/bin/" -Force
           Copy-Item README.md,LICENSE,ROADMAP.md $out/ -ErrorAction SilentlyContinue
-          if (Test-Path config/settings.example.ini) { Copy-Item config/settings.example.ini $out/config/ }
-          "Muk Game Engine`nRun bin\Muk Game Engine.exe" | Set-Content "$out/INSTALL.txt"
+          @"
+          Muk Game Engine (Windows x64)
+          =============================
+          1. Unzip this folder
+          2. Run bin\Muk Game Engine.exe  (or MukEditor.exe)
+          3. Optional: put API keys in config (OpenRouter / NVIDIA)
+
+          Note: This is a Windows desktop app, not an Android APK.
+          "@ | Set-Content "$out/INSTALL.txt"
           if (-not (Test-Path "$out/bin/MukEditor.exe")) { exit 1 }
+          Write-Host "Package staged OK"
 
       - name: Upload Windows app artifact
         uses: actions/upload-artifact@v4
