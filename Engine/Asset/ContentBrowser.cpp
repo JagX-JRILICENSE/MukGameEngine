@@ -2,6 +2,7 @@
 #include "AssetManager.h"
 #include "GltfLoader.h"
 #include "Renderer/Renderer.h"
+#include "Scene/Prefab.h"
 #include "Core/Log.h"
 #include <filesystem>
 #include <cstring>
@@ -36,6 +37,7 @@ void ContentBrowser::Rescan() {
     fs::create_directories(m_Root + "/Scripts", ec);
     fs::create_directories(m_Root + "/Scenes", ec);
     fs::create_directories(m_Root + "/Screenshots", ec);
+    fs::create_directories(m_Root + "/Prefabs", ec);
     if (!fs::exists(m_Root, ec)) {
         fs::create_directories(m_Root, ec);
         return;
@@ -88,6 +90,8 @@ void ContentBrowser::DrawImGui(AssetManager& assets, Renderer* renderer,
     if (ImGui::Button("Rescan")) Rescan();
     ImGui::SameLine();
     if (ImGui::Button("Open Assets")) { SetRoot("Assets"); Rescan(); }
+    ImGui::Separator();
+    ImGui::TextDisabled("Prefabs — use Prefab panel to spawn");
     ImGui::Separator();
     ImGui::BeginChild("assetlist");
     for (auto& e : m_Entries) {
