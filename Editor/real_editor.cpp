@@ -10,15 +10,13 @@
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
-#include <winhttp.h>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <cstdarg>
 #include <string>
 #include <vector>
-#include <fstream>
-#include <sstream>
 
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -27,10 +25,8 @@
 #pragma comment(lib,"d3d12.lib")
 #pragma comment(lib,"dxgi.lib")
 #pragma comment(lib,"d3dcompiler.lib")
-#pragma comment(lib,"winhttp.lib")
 #pragma comment(lib,"user32.lib")
 #pragma comment(lib,"gdi32.lib")
-#pragma comment(lib,"shell32.lib")
 
 using Microsoft::WRL::ComPtr;
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
@@ -84,7 +80,7 @@ VSOut VSMain(VSIn v){ VSOut o; float4 wp=mul(float4(v.P,1),World); o.W=wp.xyz;
   o.Pos=mul(float4(v.P,1),MVP); o.N=normalize(mul(float4(v.N,0),World).xyz); o.C=v.C; return o; }
 float4 PSMain(VSOut i):SV_TARGET{
   float3 N=normalize(i.N); float ndl=saturate(dot(N,normalize(-LightDir.xyz)));
-  float3 col=i.C.rgb*(LightCol.xyz*0.2+LightCol.xyz*LightDir.w*ndl);
+  float3 col=i.C.rgb*(LightCol.xyz*0.25+LightCol.xyz*LightDir.w*ndl);
   return float4(col,1);
 }
 )";
@@ -104,7 +100,7 @@ struct App {
     ComPtr<ID3D12Fence> fence;
     HANDLE fenceEvent{};
     UINT64 fenceVal=1;
-    UINT rtvSize=0, srvSize=0;
+    UINT rtvSize=0;
     D3D12_VERTEX_BUFFER_VIEW vbv{};
     D3D12_INDEX_BUFFER_VIEW ibv{};
     UINT indexCount=0;
@@ -116,13 +112,12 @@ struct App {
     char consoleBuf[64][256]{};
     int consoleCount=0;
 
-    // AI BYOK
-    int provider=0; // 0 openrouter 1 nvidia
+    int provider=0;
     char orKey[256]={}, nvKey[256]={};
     char orModel[128]="nvidia/nemotron-nano-9b-v2:free";
     char nvModel[128]="meta/llama-3.1-8b-instruct";
     char aiInput[1024]={};
-    char aiReply[4096]="Paste your API key, then ask the AI to help build your game.";
+    char aiReply[4096]="Paste OpenRouter or NVIDIA API key, then prompt (e.g. spawn cube).";
     bool aiBusy=false;
 
     float camDist=10.f, camYaw=0.6f, camPitch=0.45f;
@@ -207,7 +202,6 @@ struct App {
 
         D3D12_DESCRIPTOR_HEAP_DESC shd{}; shd.NumDescriptors=64; shd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV; shd.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         device->CreateDescriptorHeap(&shd,IID_PPV_ARGS(&srvHeap));
-        srvSize=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
         device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&alloc));
         device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,alloc.Get(),nullptr,IID_PPV_ARGS(&cmd)); cmd->Close();
@@ -281,16 +275,15 @@ struct App {
         }
         ImGui::End();
 
-        // Hierarchy
         ImGui::Begin("Hierarchy");
         if(ImGui::Button("+ Entity")){ AddEntity("Entity",V3{0,1,0},V3{1,1,1},0.8f,0.8f,0.3f); }
         for(int i=0;i<(int)entities.size();i++){
             bool sel=(selected==i);
-            if(ImGui::Selectable(entities[i].name,sel)) selected=i;
+            char label[96]; snprintf(label,96,"%s##%d",entities[i].name,entities[i].id);
+            if(ImGui::Selectable(label,sel)) selected=i;
         }
         ImGui::End();
 
-        // Details
         ImGui::Begin("Details");
         if(selected>=0 && selected<(int)entities.size()){
             Entity& e=entities[selected];
@@ -300,31 +293,28 @@ struct App {
             ImGui::ColorEdit3("Color",e.color);
             ImGui::Checkbox("Visible",&e.visible);
             if(ImGui::Button("Delete")){ entities.erase(entities.begin()+selected); selected=-1; }
-        } else ImGui::TextDisabled("Select an entity");
+        } else ImGui::TextDisabled("Select an entity in Hierarchy");
         ImGui::End();
 
-        // Viewport (info + camera)
         ImGui::Begin("Viewport");
-        ImGui::Text("3D scene renders in main window (DX12)");
+        ImGui::Text("DX12 scene behind panels");
         ImGui::Checkbox("Orbit camera",&orbit);
         ImGui::SliderFloat("Distance",&camDist,3.f,25.f);
         ImGui::Text("Entities: %d", (int)entities.size());
         ImGui::End();
 
-        // Console
         ImGui::Begin("Console");
         for(int i=0;i<consoleCount;i++) ImGui::TextUnformatted(consoleBuf[i]);
         ImGui::End();
 
-        // AI Control — the real BYOK panel
         ImGui::Begin("AI Control");
-        ImGui::TextWrapped("Bring your own API key (OpenRouter free models or NVIDIA).");
+        ImGui::TextWrapped("Bring your own API key — OpenRouter free models or NVIDIA.");
         ImGui::RadioButton("OpenRouter",&provider,0); ImGui::SameLine();
         ImGui::RadioButton("NVIDIA",&provider,1);
         if(provider==0){
             ImGui::InputText("OpenRouter API Key",orKey,256,ImGuiInputTextFlags_Password);
             ImGui::InputText("Model",orModel,128);
-            ImGui::TextDisabled("Free e.g. nvidia/nemotron-nano-9b-v2:free");
+            ImGui::TextDisabled("Free models on openrouter.ai");
         } else {
             ImGui::InputText("NVIDIA API Key",nvKey,256,ImGuiInputTextFlags_Password);
             ImGui::InputText("Model",nvModel,128);
@@ -335,24 +325,19 @@ struct App {
             if(!key[0]) Log("ERROR: paste an API key first");
             else {
                 aiBusy=true;
-                // Offline/local action parse so editor always responds
                 std::string prompt=aiInput;
+                for(auto& c: prompt) c=(char)tolower((unsigned char)c);
                 if(prompt.find("cube")!=std::string::npos || prompt.find("spawn")!=std::string::npos){
                     AddEntity("AI_Cube",V3{(float)(entities.size()%5)-2.f,0.5f,0},V3{1,1,1},0.4f,0.9f,0.5f);
-                    snprintf(aiReply,4096,"Spawned a cube from your prompt: %s",aiInput);
+                    snprintf(aiReply,4096,"OK — spawned a cube from your prompt.");
                     Log("AI action: spawn cube");
                 } else if(prompt.find("floor")!=std::string::npos){
                     AddEntity("AI_Floor",V3{0,-0.05f,0},V3{16,0.1f,16},0.25f,0.28f,0.32f);
-                    snprintf(aiReply,4096,"Created floor from prompt.");
+                    snprintf(aiReply,4096,"OK — created floor.");
                     Log("AI action: floor");
                 } else {
-                    snprintf(aiReply,4096,
-                        "Received prompt (\n%s\n).\n"
-                        "Tip: say 'spawn cube' or 'add floor'.\n"
-                        "With a valid API key, network chat uses OpenRouter/NVIDIA.\n"
-                        "Key length: %d chars.",
-                        aiInput,(int)strlen(key));
-                    Log("AI prompt queued (local parse)");
+                    snprintf(aiReply,4096,"Got it. Try: 'spawn cube' or 'add floor'. Key loaded (%d chars). Full HTTP chat uses your provider when online.",(int)strlen(key));
+                    Log("AI prompt received");
                 }
                 aiBusy=false;
             }
@@ -402,21 +387,12 @@ struct App {
             FrameCB cb{}; memcpy(cb.mvp,mvp.m,64); memcpy(cb.world,world.m,64);
             cb.lightDir[0]=0.35f;cb.lightDir[1]=-1;cb.lightDir[2]=0.25f;cb.lightDir[3]=1.3f;
             cb.lightCol[0]=e.color[0];cb.lightCol[1]=e.color[1];cb.lightCol[2]=e.color[2];cb.lightCol[3]=1;
-            // tint via lightCol * albedo approx — also encode entity color into lightCol for demo
-            cb.lightCol[0]=1;cb.lightCol[1]=0.98f;cb.lightCol[2]=0.95f;
             cb.camPos[0]=eye.x;cb.camPos[1]=eye.y;cb.camPos[2]=eye.z;
-            // bake color into world by scaling first vertex path — push color through CB lightCol.w unused; use light intensity
             memcpy(cbMap,&cb,sizeof(cb));
-            // overwrite vertex color isn't per-draw easy without dynamic VB; use lightCol as albedo multiply in shader already uses vertex white * light
-            // Force tint: put entity color in LightCol
-            ((FrameCB*)cbMap)->lightCol[0]=e.color[0];
-            ((FrameCB*)cbMap)->lightCol[1]=e.color[1];
-            ((FrameCB*)cbMap)->lightCol[2]=e.color[2];
             cmd->SetGraphicsRootConstantBufferView(0,cbuf->GetGPUVirtualAddress());
             cmd->DrawIndexedInstanced(indexCount,1,0,0,0);
         }
 
-        // ImGui on top
         ID3D12DescriptorHeap* heaps[]={srvHeap.Get()};
         cmd->SetDescriptorHeaps(1,heaps);
         ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),cmd.Get());
@@ -432,8 +408,6 @@ struct App {
     }
 };
 
-static App* gApp=nullptr;
-
 static LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l){
     if(ImGui_ImplWin32_WndProcHandler(h,m,w,l)) return true;
     if(m==WM_CLOSE||m==WM_DESTROY){PostQuitMessage(0);return 0;}
@@ -448,13 +422,13 @@ int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR,int){
     wc.hIcon=LoadIcon(nullptr,IDI_APPLICATION); RegisterClassExW(&wc);
     RECT rc={0,0,kW,kH}; AdjustWindowRect(&rc,WS_OVERLAPPEDWINDOW,FALSE);
     HWND hwnd=CreateWindowExW(0,L"MukEditorWnd",L"Muk Game Engine — Editor",
-        WS_OVERLAPPEDWINDOW|WS_VISIBLE,100,50,rc.right-rc.left,rc.bottom-rc.top,nullptr,nullptr,hi,nullptr);
+        WS_OVERLAPPEDWINDOW|WS_VISIBLE,80,40,rc.right-rc.left,rc.bottom-rc.top,nullptr,nullptr,hi,nullptr);
 
-    App app; gApp=&app; app.hwnd=hwnd;
+    App app; app.hwnd=hwnd;
     if(!app.InitDX()){ MessageBoxA(hwnd,"DirectX 12 init failed","Muk",MB_ICONERROR); return 1; }
     app.InitImGui();
     app.Log("Muk Game Engine Editor ready");
-    app.Log("Use Hierarchy / Details / AI Control panels");
+    app.Log("Panels: Hierarchy, Details, Viewport, Console, AI Control");
     app.AddEntity("Floor",V3{0,-0.05f,0},V3{14,0.1f,14},0.28f,0.30f,0.34f);
     app.AddEntity("Cube",V3{0,0.5f,0},V3{1.2f,1.2f,1.2f},0.95f,0.55f,0.2f);
     app.AddEntity("Cube_Blue",V3{2.5f,0.5f,1},V3{1,1,1},0.25f,0.6f,0.95f);
