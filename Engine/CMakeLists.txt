@@ -15,6 +15,7 @@ set(ENGINE_SOURCES
     RHI/DX12/DX12ShadowMap.cpp
     Renderer/Renderer.cpp
     Renderer/Mesh.cpp
+    Renderer/IBLCubemap.cpp
     Input/Input.cpp
     Input/InputActions.cpp
     Physics/PhysicsWorld.cpp
@@ -33,6 +34,7 @@ set(ENGINE_SOURCES
     AI/AIGameAgent.cpp
     AI/MultiAgentTeam.cpp
     AI/AsyncAI.cpp
+    AI/AITools.cpp
     Scene/SceneRenderer.cpp
     Scene/SceneSerializer.cpp
     Scene/Prefab.cpp
@@ -42,6 +44,7 @@ set(ENGINE_SOURCES
     Reflection/Reflection.cpp
     Script/GameplayScript.cpp
     Gameplay/Collectible.cpp
+    Gameplay/TriggerVolume.cpp
     Particles/ParticleSystem.cpp
 )
 
@@ -52,6 +55,10 @@ set(ENGINE_HEADERS
     Core/Core.h
     Core/Profiler.h
     Core/AppIcon.h
+    Core/ConsoleCommands.h
+    Core/ProjectSettings.h
+    Core/GameTimer.h
+    Core/StringTable.h
     Math/Vector.h
     Math/Matrix.h
     Math/Math.h
@@ -69,6 +76,7 @@ set(ENGINE_HEADERS
     Renderer/Material.h
     Renderer/Texture.h
     Renderer/PostSettings.h
+    Renderer/IBLCubemap.h
     Input/Input.h
     Input/InputActions.h
     Physics/PhysicsWorld.h
@@ -87,16 +95,19 @@ set(ENGINE_HEADERS
     AI/AIGameAgent.h
     AI/MultiAgentTeam.h
     AI/AsyncAI.h
+    AI/AITools.h
     Scene/SceneRenderer.h
     Scene/SceneSerializer.h
     Scene/Prefab.h
     Animation/Skeleton.h
     Animation/Skinning.h
+    Animation/SkinGPU.h
     Navigation/GridPath.h
     Audio/AudioSystem.h
     Reflection/Reflection.h
     Script/GameplayScript.h
     Gameplay/Collectible.h
+    Gameplay/TriggerVolume.h
     Particles/ParticleSystem.h
     Engine.h
 )
