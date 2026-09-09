@@ -6,6 +6,7 @@
 #include "Gameplay/Collectible.h"
 #include "Particles/ParticleSystem.h"
 #include "Asset/ContentBrowser.h"
+#include "Editor/UndoStack.h"
 #include "Core/Log.h"
 #include <sstream>
 #include <cstdio>
@@ -65,6 +66,7 @@ void AIGameAgent::StartBuild(const std::string& userBrief) {
     m_ScriptSource.clear();
     m_UIActions.clear();
     m_Runtime.Clear();
+    if (m_Undo) m_Undo->BeginAISpawnBatch();
     Log(std::string("=== Async full build === ") + userBrief);
 }
 
@@ -140,7 +142,9 @@ void AIGameAgent::ApplyActions(World& world, Renderer& renderer, AudioSystem* au
             if (auto p = line.find("x="); p != std::string::npos) sscanf(line.c_str() + p, "x=%f", &x);
             if (auto p = line.find("y="); p != std::string::npos) sscanf(line.c_str() + p, "y=%f", &y);
             if (auto p = line.find("z="); p != std::string::npos) sscanf(line.c_str() + p, "z=%f", &z);
-            CollectibleSystem::SpawnOrb(world, { x, y, z }, 1, &entities);
+            auto orb = CollectibleSystem::SpawnOrb(world, { x, y, z }, 1, &entities);
+            if (m_Undo && orb.IsValid())
+                m_Undo->RecordAISpawn(orb, entities.empty() ? "Orb" : entities.back().Name);
             if (particles) particles->Burst({ x, y, z }, 8, { 1, 0.9f, 0.3f }, 1.5f, 0.3f);
             continue;
         }
@@ -162,8 +166,8 @@ void AIGameAgent::ApplyActions(World& world, Renderer& renderer, AudioSystem* au
 
             auto e = world.CreateEntity();
             world.AddComponent<NameComponent>(e).Name = name;
-            auto& t = world.AddComponent<Transform>(e);
-            t.Position = { x, y, z }; t.Scale = { sx, sy, sz };
+            auto& tr = world.AddComponent<Transform>(e);
+            tr.Position = { x, y, z }; tr.Scale = { sx, sy, sz };
             auto& mr = world.AddComponent<MeshRenderer>(e);
             mr.MeshName = mesh; mr.MaterialName = mat;
 
@@ -172,7 +176,7 @@ void AIGameAgent::ApplyActions(World& world, Renderer& renderer, AudioSystem* au
             if (low.find("orb") != std::string::npos) {
                 auto& col = world.AddComponent<CollectibleComponent>(e);
                 col.Radius = 1.25f; col.ScoreValue = 1;
-                t.Scale = { 0.35f, 0.35f, 0.35f };
+                tr.Scale = { 0.35f, 0.35f, 0.35f };
             }
             if (low.find("player") != std::string::npos) {
                 auto& coll = world.AddComponent<CollectorComponent>(e);
@@ -181,8 +185,9 @@ void AIGameAgent::ApplyActions(World& world, Renderer& renderer, AudioSystem* au
 
             entities.push_back({ e, name, false });
             selected = e;
+            if (m_Undo) m_Undo->RecordAISpawn(e, name);
             Log(std::string("spawn ") + name);
-            if (audio) { AudioSourceDesc d; d.ClipName = "place"; d.Position = t.Position; audio->Play(d); }
+            if (audio) { AudioSourceDesc d; d.ClipName = "place"; d.Position = tr.Position; audio->Play(d); }
             continue;
         }
 
@@ -257,6 +262,7 @@ ScriptHostCallbacks AIGameAgent::MakeHost(World& world, Renderer& renderer, Audi
         t.Position = { x, y, z }; t.Scale = { sx, sy, sz };
         world.AddComponent<MeshRenderer>(e).MeshName = mesh.empty() ? "Cube" : mesh;
         entities.push_back({ e, name, false }); selected = e;
+        if (m_Undo) m_Undo->RecordAISpawn(e, name);
     };
     host.DestroyByName = [&](const std::string& name) {
         for (size_t i = 0; i < entities.size(); ++i)
@@ -360,6 +366,7 @@ void AIGameAgent::HandleAsyncResults(World& world, Renderer& renderer, AudioSyst
     for (auto& r : results) {
         if (!r.Response.Success) {
             m_Phase = AgentPhase::Failed; m_Status = r.Response.Error;
+            if (m_Undo) m_Undo->EndAISpawnBatch(&entities);
             Log(r.Response.Error, true); m_WaitingAsync = false; return;
         }
         const std::string& content = r.Response.Content;
@@ -425,6 +432,7 @@ void AIGameAgent::Tick(World& world, Renderer& renderer, AudioSystem* audio,
             SaveGeneratedAssets(nullptr);
             m_Phase = AgentPhase::Done;
             m_Status = m_Runtime.HasWon() ? "Done — WIN" : m_Runtime.HasLost() ? "Done — LOSE" : "Done";
+            if (m_Undo) m_Undo->EndAISpawnBatch(&entities);
             Log(m_Status);
             if (audio) { AudioSourceDesc d; d.ClipName = "success"; d.Spatial = false; audio->Play(d); }
             if (particles) particles->Burst({ 0, 1, 0 }, 40, { 0.3f, 1, 0.4f });
@@ -475,7 +483,9 @@ void AIGameAgent::Tick(World& world, Renderer& renderer, AudioSystem* audio,
     }
     if (m_Phase == AgentPhase::Fixing) {
         if (m_FixAttempts >= kMaxFixAttempts) {
-            m_Phase = AgentPhase::Failed; m_Status = "Failed after fix attempts"; Log(m_Status, true); return;
+            m_Phase = AgentPhase::Failed; m_Status = "Failed after fix attempts";
+            if (m_Undo) m_Undo->EndAISpawnBatch(&entities);
+            Log(m_Status, true); return;
         }
         ++m_FixAttempts;
         SubmitPhase(AgentRole::Builder, "fixer",
@@ -488,7 +498,7 @@ void AIGameAgent::Tick(World& world, Renderer& renderer, AudioSystem* audio,
 void AIGameAgent::DrawImGui() {
 #ifdef MUK_USE_IMGUI
     ImGui::Begin("AI Game Builder");
-    ImGui::TextWrapped("Non-blocking AsyncAI multi-agent. Autosaves to Assets/Scripts & Scenes.");
+    ImGui::TextWrapped("Non-blocking AsyncAI. Ctrl+Z undoes last AI spawn batch.");
     if (m_Async.IsBusy())
         ImGui::TextColored(ImVec4(1, 0.85f, 0.2f, 1), "AI worker busy — editor responsive");
     ImGui::InputTextMultiline("##brief", m_BriefEdit, sizeof(m_BriefEdit), ImVec2(-1, 70));
