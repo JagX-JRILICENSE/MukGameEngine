@@ -16,11 +16,12 @@ namespace fs = std::filesystem;
 
 AssetKind ContentBrowser::GuessKind(const std::string& path) {
     auto ext = fs::path(path).extension().string();
-    for (auto& c : ext) c = (char)tolower(c);
+    for (auto& c : ext) c = (char)tolower((unsigned char)c);
     if (ext == ".gltf" || ext == ".glb") return AssetKind::MeshGltf;
     if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga") return AssetKind::Texture;
     if (ext == ".json" || ext == ".mukscene") return AssetKind::Scene;
     if (ext == ".wav" || ext == ".ogg") return AssetKind::Audio;
+    if (ext == ".muk" || ext == ".txt") return AssetKind::Script;
     return AssetKind::Unknown;
 }
 
@@ -32,9 +33,11 @@ void ContentBrowser::SetRoot(const std::string& root) {
 void ContentBrowser::Rescan() {
     m_Entries.clear();
     std::error_code ec;
+    fs::create_directories(m_Root + "/Scripts", ec);
+    fs::create_directories(m_Root + "/Scenes", ec);
+    fs::create_directories(m_Root + "/Screenshots", ec);
     if (!fs::exists(m_Root, ec)) {
         fs::create_directories(m_Root, ec);
-        MUK_CORE_INFO("ContentBrowser created root {0}", m_Root.c_str());
         return;
     }
     for (auto it = fs::recursive_directory_iterator(m_Root, ec);
@@ -84,10 +87,7 @@ void ContentBrowser::DrawImGui(AssetManager& assets, Renderer* renderer,
     }
     if (ImGui::Button("Rescan")) Rescan();
     ImGui::SameLine();
-    if (ImGui::Button("Open Assets folder")) {
-        SetRoot("Assets");
-        Rescan();
-    }
+    if (ImGui::Button("Open Assets")) { SetRoot("Assets"); Rescan(); }
     ImGui::Separator();
     ImGui::BeginChild("assetlist");
     for (auto& e : m_Entries) {
@@ -96,6 +96,7 @@ void ContentBrowser::DrawImGui(AssetManager& assets, Renderer* renderer,
         else if (e.Kind == AssetKind::Texture) kind = "Tex";
         else if (e.Kind == AssetKind::Scene) kind = "Scene";
         else if (e.Kind == AssetKind::Audio) kind = "Audio";
+        else if (e.Kind == AssetKind::Script) kind = "Script";
 
         ImGui::PushID(e.Path.c_str());
         if (ImGui::Selectable(e.Name.c_str(), false)) {
@@ -112,7 +113,7 @@ void ContentBrowser::DrawImGui(AssetManager& assets, Renderer* renderer,
         ImGui::PopID();
     }
     if (m_Entries.empty())
-        ImGui::TextDisabled("Drop .gltf/.glb into Assets/ then Rescan");
+        ImGui::TextDisabled("AI builds save .muk scripts here after Rescan");
     ImGui::EndChild();
     ImGui::End();
 #else
