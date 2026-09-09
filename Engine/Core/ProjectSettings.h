@@ -5,6 +5,9 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <cmath>
+#include <algorithm>
+#include <cstdlib>
 
 namespace Muk {
 
@@ -15,17 +18,15 @@ struct ProjectSettings {
     float CameraSpeed = 5.0f;
     float CameraOrbitSensitivity = 0.25f;
 
-    // Fog
     bool FogEnabled = true;
     Vec3 FogColor{0.08f, 0.09f, 0.12f};
     float FogDensity = 0.015f;
     float FogStart = 15.0f;
     float FogEnd = 80.0f;
 
-    // Day/night
     bool DayNightCycle = false;
-    float TimeOfDay = 12.0f; // 0-24
-    float DaySpeed = 0.5f;   // hours per real second when playing
+    float TimeOfDay = 12.0f;
+    float DaySpeed = 0.5f;
 
     void TickDayNight(float dt) {
         if (!DayNightCycle) return;
@@ -33,11 +34,9 @@ struct ProjectSettings {
         if (TimeOfDay >= 24.f) TimeOfDay -= 24.f;
     }
 
-    /** Light intensity multiplier from time of day */
     float DayLightFactor() const {
-        // Peak at 12, low at night
         float t = TimeOfDay / 24.f;
-        float angle = (t - 0.25f) * 6.28318f; // midnight dark
+        float angle = (t - 0.25f) * 6.28318f;
         float s = std::sin(angle);
         return std::max(0.08f, s * 0.5f + 0.5f);
     }
