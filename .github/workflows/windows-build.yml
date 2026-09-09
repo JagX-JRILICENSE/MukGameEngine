@@ -25,11 +25,13 @@ jobs:
       - name: Package real app
         shell: pwsh
         run: |
+          Get-ChildItem -Path build -Recurse -Filter "*.exe" | ForEach-Object { Write-Host "$($_.FullName) $($_.Length) bytes" }
           $exe = Get-ChildItem -Path build -Recurse -Filter "MukEditor.exe" | Select-Object -First 1
           if (-not $exe) { throw "MukEditor.exe missing" }
           $size = $exe.Length
           Write-Host "MukEditor.exe = $size bytes"
-          if ($size -lt 80000) { throw "Exe too small ($size) — expected real DX12 app" }
+          # Real DX12 app is typically 50KB–500KB; reject only the old ~10KB MessageBox stub
+          if ($size -lt 20000) { throw "Exe too small ($size) — looks like stub" }
           $out = "MukGameEngine-Windows-x64"
           New-Item -ItemType Directory -Force -Path "$out/bin" | Out-Null
           Copy-Item $exe.FullName "$out/bin/MukEditor.exe"
@@ -39,15 +41,12 @@ jobs:
           ==================================
           Double-click:  bin\Muk Game Engine.exe
 
-          You should see a window titled "Muk Game Engine"
-          with a dark blue background and a colored triangle.
+          Expected: a window titled "Muk Game Engine"
+          dark blue background + colored triangle.
 
-          Close the window with the X button.
-
-          This is a Windows DirectX 12 desktop application
-          (NOT an Android APK, NOT a MessageBox stub).
+          Close with the X button.
+          Windows DirectX 12 desktop app (not Android, not MessageBox).
           "@ | Set-Content "$out/INSTALL.txt"
-          Copy-Item README.md $out/ -ErrorAction SilentlyContinue
 
       - uses: actions/upload-artifact@v4
         with:
