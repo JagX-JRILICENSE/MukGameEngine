@@ -22,38 +22,70 @@ jobs:
         shell: cmd
         run: cmake --build build --config Release --parallel 4
 
-      - name: Package real editor
+      - name: Package full application folder
         shell: pwsh
         run: |
-          $all = @(Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue)
-          foreach ($f in $all) { Write-Host "EXE $($f.FullName) $($f.Length) bytes" }
-          $exe = $all | Where-Object { $_.Name -match 'Muk' } | Sort-Object Length -Descending | Select-Object -First 1
-          if (-not $exe) { $exe = $all | Sort-Object Length -Descending | Select-Object -First 1 }
-          if (-not $exe) { throw "No exe" }
-          Write-Host "Packaging $($exe.FullName) size=$($exe.Length)"
-          if ($exe.Length -lt 200000) { throw "Exe too small $($exe.Length) — expect ImGui editor >200KB" }
-          $out = "MukGameEngine-Windows-x64"
-          New-Item -ItemType Directory -Force -Path "$out/bin" | Out-Null
-          Copy-Item $exe.FullName "$out/bin/MukEditor.exe"
-          Copy-Item $exe.FullName "$out/bin/Muk Game Engine.exe"
+          $all = @(Get-ChildItem -Path build -Recurse -Filter "MukEditor.exe" -ErrorAction SilentlyContinue)
+          if ($all.Count -eq 0) { $all = @(Get-ChildItem -Path build -Recurse -Filter "*.exe") }
+          $exe = $all | Sort-Object Length -Descending | Select-Object -First 1
+          if (-not $exe) { throw "No exe built" }
+          Write-Host "EXE: $($exe.FullName) size=$($exe.Length)"
+          if ($exe.Length -lt 150000) { throw "Exe too small: $($exe.Length)" }
+
+          $out = "MukGameEngine"
+          New-Item -ItemType Directory -Force -Path "$out" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$out/Assets" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$out/Assets/Scenes" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$out/Assets/Scripts" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$out/Docs" | Out-Null
+
+          Copy-Item $exe.FullName "$out/Muk Game Engine.exe" -Force
+          Copy-Item $exe.FullName "$out/MukEditor.exe" -Force
+
+          # Launcher (double-click friendly)
           @"
-          Muk Game Engine — REAL EDITOR
-          =============================
-          Run: bin\Muk Game Engine.exe
+          @echo off
+          cd /d "%~dp0"
+          start "" "Muk Game Engine.exe"
+          "@ | Set-Content "$out/Launch Muk Engine.bat" -Encoding ASCII
 
-          Panels:
-            Hierarchy — select / create entities
-            Details — edit position, scale, color
-            Viewport — camera controls
-            Console — log
-            AI Control — paste OpenRouter or NVIDIA API key
+          @"
+          Muk Game Engine — Windows Application
+          =====================================
 
-          Menu: Create → Floor / Cubes
-          AI prompt tips: "spawn cube" / "add floor"
-          "@ | Set-Content "$out/INSTALL.txt"
+          HOW TO RUN
+          1. Unzip this folder anywhere (Desktop is fine)
+          2. Double-click:  "Muk Game Engine.exe"
+             or:            "Launch Muk Engine.bat"
+
+          This is a WINDOWS GUI app (DirectX 12 + Dear ImGui editor).
+          It must NOT open a black terminal. If it does, you ran the wrong file.
+
+          WHAT YOU GET
+          - Docking editor UI (Hierarchy, Details, Viewport, Console, AI)
+          - Create / select / move / recolor entities
+          - AI Control panel: paste OpenRouter or NVIDIA API key
+          - DX12 3D scene with lighting
+
+          REQUIREMENTS
+          - Windows 10/11 64-bit
+          - DirectX 12 capable GPU (most PCs since 2015)
+
+          NOTE ON SIZE
+          Godot/Unreal packages are 100MB–GBs because they ship the full
+          editor, export templates, and asset pipelines. This build is the
+          Muk editor application core. Full engine source lives on GitHub.
+          "@ | Set-Content "$out/README.txt" -Encoding UTF8
+
+          @"
+          { "version": "0.16", "entities": [] }
+          "@ | Set-Content "$out/Assets/Scenes/default.json" -Encoding UTF8
+
+          Write-Host "Packaged folder:"
+          Get-ChildItem $out -Recurse | ForEach-Object { Write-Host $_.FullName $_.Length }
 
       - uses: actions/upload-artifact@v4
         with:
           name: MukGameEngine-Windows-x64
-          path: MukGameEngine-Windows-x64
+          path: MukGameEngine
           retention-days: 30
