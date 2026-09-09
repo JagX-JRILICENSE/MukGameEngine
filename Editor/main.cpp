@@ -12,6 +12,9 @@
 #include "Reflection/Reflection.h"
 #include "Audio/AudioSystem.h"
 #include "Animation/Skeleton.h"
+#include "Animation/Skinning.h"
+#include "Navigation/GridPath.h"
+#include "Renderer/PostSettings.h"
 #include "Physics/CharacterController.h"
 #include "Gameplay/Collectible.h"
 #include "Particles/ParticleSystem.h"
@@ -21,7 +24,6 @@
 #ifdef MUK_PLATFORM_WINDOWS
 #include <Windows.h>
 #endif
-
 #ifdef MUK_USE_IMGUI
 #include <imgui.h>
 #endif
@@ -37,11 +39,16 @@ protected:
 
         UserSettings s; s.Load();
         m_Agent.SetSettings(s);
+        m_Agent.SetUndoStack(&m_Undo);
 
         m_Audio.Initialize();
         m_Anim.EnsureDemoAssets();
         m_Content.SetRoot("Assets");
         m_Content.Rescan();
+
+        // Nav grid 20x20 cells, 1m each, origin -10,-10
+        m_Nav.Configure(20, 20, 1.0f, { -10, 0, -10 });
+        m_Nav.BlockWorldCircle({ 1.5f, 0, 0 }, 0.8f); // cube obstacle
 
         Renderer().SetCamera({ {0.0f, 3.0f, -8.0f}, {0.0f, 0.5f, 0.0f} });
 
@@ -52,7 +59,6 @@ protected:
             L.Direction = {0.45f, -1.0f, 0.35f}; L.Intensity = 1.5f; L.Ambient = 0.18f;
             Track(e, "Sun");
         }
-
         {
             auto e = ECS().CreateEntity();
             ECS().AddComponent<NameComponent>(e).Name = "Floor";
@@ -60,11 +66,7 @@ protected:
             t.Position = {0, -0.1f, 0}; t.Scale = {12, 0.2f, 12};
             ECS().AddComponent<MeshRenderer>(e).MeshName = "Cube";
             Track(e, "Floor");
-            RigidBodyDesc rb; rb.Type = BodyType::Static; rb.Shape = ShapeType::Box;
-            rb.Position = t.Position; rb.HalfExtents = {6, 0.1f, 6};
-            ECS().AddComponent<RigidBodyComponent>(e).BodyId = Physics().CreateBody(rb);
         }
-
         {
             auto e = ECS().CreateEntity();
             ECS().AddComponent<NameComponent>(e).Name = "Cube";
@@ -72,7 +74,6 @@ protected:
             ECS().AddComponent<MeshRenderer>(e).MeshName = "Cube";
             Track(e, "Cube"); m_Selected = e;
         }
-
         {
             CharacterDesc cd; cd.Position = {0, 1.0f, 2};
             m_Character.Create(Physics(), cd);
@@ -85,8 +86,29 @@ protected:
             coll.TargetScore = 3;
             Track(e, "Player"); m_PlayerEntity = e;
         }
+        // Patrol enemy uses pathfinding
+        {
+            auto e = ECS().CreateEntity();
+            ECS().AddComponent<NameComponent>(e).Name = "Enemy";
+            auto& t = ECS().AddComponent<Transform>(e);
+            t.Position = { -4, 0.5f, -4 }; t.Scale = { 0.45f, 0.9f, 0.45f };
+            ECS().AddComponent<MeshRenderer>(e).MeshName = "Cube";
+            Track(e, "Enemy"); m_EnemyEntity = e;
+            m_EnemyPath = m_Nav.FindPath(t.Position, { 0, 0, 2 });
+        }
+        // Skinned demo arm
+        {
+            auto e = ECS().CreateEntity();
+            ECS().AddComponent<NameComponent>(e).Name = "SkinnedArm";
+            auto& t = ECS().AddComponent<Transform>(e);
+            t.Position = { 3, 1.0f, 0 };
+            auto& anim = ECS().AddComponent<Animator>(e);
+            anim.SkeletonName = "DemoArm";
+            anim.ClipName = "Wave";
+            anim.Playing = true;
+            Track(e, "SkinnedArm"); m_SkinnedEntity = e;
+        }
 
-        // Demo orbs for collectible pipeline
         CollectibleSystem::SpawnOrb(ECS(), { -2, 0.4f, 0 }, 1, &m_Entities);
         CollectibleSystem::SpawnOrb(ECS(), { 2, 0.4f, 1 }, 1, &m_Entities);
         CollectibleSystem::SpawnOrb(ECS(), { 0, 0.4f, -2 }, 1, &m_Entities);
@@ -102,7 +124,7 @@ protected:
         if (auto cube = Assets().GetMesh("Cube"))
             Renderer().UploadMesh("Cube", *cube);
 
-        m_UI.Log("v0.10 async AI · collectibles · particles · GPU screenshots");
+        m_UI.Log("v0.11 icon · AI undo · pathfinding · bloom/IBL · skinning");
     }
 
     void OnUpdate(float dt) override {
@@ -122,7 +144,6 @@ protected:
             SceneSerializer::SaveWorld(ECS(), "Assets/Scenes/autosave.json", &m_Entities);
         if (f12 && !f12Was) {
             Screenshot::CaptureSceneRT(Renderer(), "viewport");
-            m_UI.Log("Screenshot saved under Assets/Screenshots");
             m_Content.Rescan();
         }
         zWas=zDown; yWas=yDown; pWas=pDown; sWas=sDown; f12Was=f12;
@@ -133,6 +154,7 @@ protected:
         if (keyTimer > 2.0f) {
             keyTimer = 0;
             UserSettings s; s.Load(); m_Agent.SetSettings(s);
+            m_Agent.SetUndoStack(&m_Undo);
         }
 
         m_Agent.Tick(ECS(), Renderer(), &m_Audio, m_Entities, m_Selected, &m_Particles);
@@ -141,6 +163,26 @@ protected:
 
         m_Collect.Update(ECS(), &m_Particles, &m_Audio);
         m_Particles.Update(dt);
+
+        // Pathfinding: enemy chases player
+        if (m_EnemyEntity.IsValid() && m_PlayerEntity.IsValid()) {
+            auto* et = ECS().GetComponent<Transform>(m_EnemyEntity);
+            auto* pt = ECS().GetComponent<Transform>(m_PlayerEntity);
+            if (et && pt) {
+                m_PathRepathTimer -= dt;
+                if (m_PathRepathTimer <= 0.f || m_EnemyPath.empty()) {
+                    m_EnemyPath = m_Nav.FindPath(et->Position, pt->Position);
+                    m_PathRepathTimer = 0.5f;
+                }
+                et->Position = GridPathfinder::FollowPath(m_EnemyPath, et->Position, 2.5f, dt);
+            }
+        }
+
+        // Skinning update
+        if (m_SkinnedEntity.IsValid()) {
+            if (auto* anim = ECS().GetComponent<Animator>(m_SkinnedEntity))
+                m_Anim.Update(*anim, dt);
+        }
 
         m_Audio.SetListener({ Renderer().GetCamera().Eye, {0,0,1}, {0,1,0} });
         m_Audio.Update(dt);
@@ -169,20 +211,45 @@ protected:
         DrawToolbar();
         m_UI.DrawHierarchy(m_Entities, m_Selected);
         DrawDetails();
+        DrawPostPanel();
         m_Content.DrawImGui(Assets(), &Renderer());
         m_UI.DrawConsole();
         m_AI.Draw(Renderer());
         m_Agent.DrawImGui();
         DrawStats();
 
+        // Ambient from hemisphere IBL
+        Vec3 amb = m_Post.SampleHemisphere({ 0, 1, 0 });
+        float ambAvg = (amb.x + amb.y + amb.z) / 3.0f;
+        float ambient = 0.12f + ambAvg;
+        float intensity = 1.3f * m_Post.Exposure;
+        if (m_Post.BloomEnabled)
+            intensity += m_Post.BloomStrength * 0.15f;
+
         auto drawScene = [&]() {
-            Renderer().SetDirectionalLight({0.45f, -1.0f, 0.35f}, {1, 0.98f, 0.92f}, 1.5f, 0.18f);
-            ECS().ForEach<Transform, MeshRenderer>([&](Entity, Transform& t, MeshRenderer& mr) {
+            Renderer().SetDirectionalLight({0.45f, -1.0f, 0.35f},
+                {1, 0.98f, 0.92f}, intensity, ambient);
+            ECS().ForEach<Transform, MeshRenderer>([&](Entity e, Transform& t, MeshRenderer& mr) {
                 if (!mr.Visible) return;
+                if (e.GetID() == m_SkinnedEntity.GetID()) return; // drawn via skinning
                 Material mat = Material::CreateDefault();
+                // Cheap bloom: lift albedo slightly when bloom on
+                if (m_Post.BloomEnabled) {
+                    mat.BaseColor.x = std::min(1.f, mat.BaseColor.x + m_Post.BloomStrength * 0.05f);
+                    mat.BaseColor.y = std::min(1.f, mat.BaseColor.y + m_Post.BloomStrength * 0.05f);
+                    mat.BaseColor.z = std::min(1.f, mat.BaseColor.z + m_Post.BloomStrength * 0.08f);
+                }
                 if (auto m = Assets().GetMaterial(mr.MaterialName)) mat = *m;
                 Renderer().DrawMesh(mr.MeshName, t.GetMatrix(), mat);
             });
+            if (m_SkinnedEntity.IsValid()) {
+                auto* anim = ECS().GetComponent<Animator>(m_SkinnedEntity);
+                auto* t = ECS().GetComponent<Transform>(m_SkinnedEntity);
+                if (anim && t) {
+                    Material sm = Material::CreateUnlit({ 0.9f, 0.7f, 0.3f, 1 });
+                    SkinningSystem::DrawSkeletonDebug(Renderer(), *anim, t->GetMatrix(), sm);
+                }
+            }
             m_Particles.Render(Renderer());
         };
 
@@ -227,14 +294,28 @@ private:
             if (ImGui::Button("Play (F5)")) m_PIE.Play(ECS(), &m_Character);
         }
         ImGui::SameLine();
+        if (ImGui::Button("Undo AI")) m_Undo.Undo(ECS());
+        ImGui::SameLine();
         if (ImGui::Button("Screenshot (F12)")) {
             Screenshot::CaptureSceneRT(Renderer(), "viewport");
             m_Content.Rescan();
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Save Scene"))
-            SceneSerializer::SaveWorld(ECS(), "Assets/Scenes/scene.json", &m_Entities);
-        ImGui::Text("v0.10 async AI · orbs · particles");
+        ImGui::Text("v0.11 · %s", m_Undo.CanUndo() ? m_Undo.PeekUndoName() : "no undo");
+        ImGui::End();
+#endif
+    }
+
+    void DrawPostPanel() {
+#ifdef MUK_USE_IMGUI
+        ImGui::Begin("Post / IBL");
+        ImGui::SliderFloat("Exposure", &m_Post.Exposure, 0.2f, 3.0f);
+        ImGui::Checkbox("Bloom", &m_Post.BloomEnabled);
+        ImGui::SliderFloat("Bloom Strength", &m_Post.BloomStrength, 0, 1.5f);
+        ImGui::SliderFloat("IBL Strength", &m_Post.IblStrength, 0, 1.0f);
+        ImGui::ColorEdit3("Sky", &m_Post.SkyColor.x);
+        ImGui::ColorEdit3("Ground", &m_Post.GroundColor.x);
+        ImGui::ColorEdit3("Env Spec", &m_Post.EnvSpecular.x);
+        ImGui::SliderFloat("Env Spec Str", &m_Post.EnvSpecularStrength, 0, 1);
         ImGui::End();
 #endif
     }
@@ -246,8 +327,8 @@ private:
             ImGui::Text("Entity %u", m_Selected.GetID());
             Reflection::DrawImGui(ECS(), m_Selected);
         }
+        ImGui::Text("Path waypoints: %d", (int)m_EnemyPath.size());
         ImGui::Text("Particles: %d", m_Particles.AliveCount());
-        ImGui::Text("AI async: %s", m_Agent.Async().IsBusy() ? "busy" : "idle");
         if (m_PlayerEntity.IsValid())
             if (auto* c = ECS().GetComponent<CollectorComponent>(m_PlayerEntity))
                 ImGui::Text("Score: %d / %d", c->Score, c->TargetScore);
@@ -296,9 +377,15 @@ private:
     CharacterController m_Character;
     CollectibleSystem m_Collect;
     ParticleSystem m_Particles;
+    GridPathfinder m_Nav;
+    PostSettings m_Post;
+    std::vector<Vec3> m_EnemyPath;
+    float m_PathRepathTimer = 0;
     std::vector<EditorEntityInfo> m_Entities;
     Entity m_Selected;
     Entity m_PlayerEntity;
+    Entity m_EnemyEntity;
+    Entity m_SkinnedEntity;
 };
 
 int main() {
