@@ -16,5 +16,4 @@
 #include "Renderer/Texture.h"
 #include "Input/Input.h"
 #include "Physics/PhysicsWorld.h"
-#include "Physics/CharacterController.h"
 #include "Asset/AssetManager.h"
