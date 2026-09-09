@@ -17,7 +17,6 @@ set(ENGINE_SOURCES
     Renderer/Mesh.cpp
     Input/Input.cpp
     Physics/PhysicsWorld.cpp
-    Physics/CharacterController.cpp
     Asset/AssetManager.cpp
     Asset/GltfLoader.cpp
 )
@@ -47,8 +46,4 @@ endif()
 
 if(MUK_USE_TINYGLTF)
     target_include_directories(MukEngine PUBLIC ${tinygltf_SOURCE_DIR})
-endif()
-
-if(MUK_USE_JOLT)
-    target_link_libraries(MukEngine PUBLIC Jolt)
 endif()
