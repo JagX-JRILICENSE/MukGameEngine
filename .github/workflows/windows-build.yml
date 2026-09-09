@@ -9,7 +9,7 @@ jobs:
   build:
     name: Build Muk (Windows x64)
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -22,38 +22,35 @@ jobs:
         shell: cmd
         run: cmake --build build --config Release --parallel 4
 
-      - name: Package real app
+      - name: Package real editor
         shell: pwsh
         run: |
           $all = @(Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue)
-          foreach ($f in $all) { Write-Host "EXE: $($f.FullName)  $($f.Length) bytes" }
-          if ($all.Count -eq 0) { throw "No .exe produced" }
+          foreach ($f in $all) { Write-Host "EXE $($f.FullName) $($f.Length) bytes" }
           $exe = $all | Where-Object { $_.Name -match 'Muk' } | Sort-Object Length -Descending | Select-Object -First 1
           if (-not $exe) { $exe = $all | Sort-Object Length -Descending | Select-Object -First 1 }
-          Write-Host "Selected: $($exe.FullName) size=$($exe.Length)"
-          # Real /MT DX12 app should be well above MessageBox stub (~10KB)
-          if ($exe.Length -lt 100000) {
-            throw "Refusing to ship tiny exe ($($exe.Length) bytes). Expected >100KB real app."
-          }
+          if (-not $exe) { throw "No exe" }
+          Write-Host "Packaging $($exe.FullName) size=$($exe.Length)"
+          if ($exe.Length -lt 200000) { throw "Exe too small $($exe.Length) — expect ImGui editor >200KB" }
           $out = "MukGameEngine-Windows-x64"
           New-Item -ItemType Directory -Force -Path "$out/bin" | Out-Null
-          Copy-Item $exe.FullName "$out/bin/MukEditor.exe" -Force
-          Copy-Item $exe.FullName "$out/bin/Muk Game Engine.exe" -Force
+          Copy-Item $exe.FullName "$out/bin/MukEditor.exe"
+          Copy-Item $exe.FullName "$out/bin/Muk Game Engine.exe"
           @"
-          Muk Game Engine — REAL Windows DirectX 12 app
-          ==============================================
-          Size of exe should be 100KB+ (not 13–17KB stub).
+          Muk Game Engine — REAL EDITOR
+          =============================
+          Run: bin\Muk Game Engine.exe
 
-          Run:  bin\Muk Game Engine.exe
+          Panels:
+            Hierarchy — select / create entities
+            Details — edit position, scale, color
+            Viewport — camera controls
+            Console — log
+            AI Control — paste OpenRouter or NVIDIA API key
 
-          You should see:
-            - Window titled "Muk Game Engine | DX12 Demo"
-            - Dark scene with colored cubes on a floor
-            - Camera slowly orbiting
-            - FPS in the title bar
-            - ESC to quit
+          Menu: Create → Floor / Cubes
+          AI prompt tips: "spawn cube" / "add floor"
           "@ | Set-Content "$out/INSTALL.txt"
-          Write-Host "Package OK — $($exe.Length) bytes"
 
       - uses: actions/upload-artifact@v4
         with:
