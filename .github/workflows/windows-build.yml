@@ -3,13 +3,10 @@ name: Windows Build
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 env:
   CMAKE_BUILD_PARALLEL_LEVEL: 4
-  GIT_TERMINAL_PROMPT: 0
 
 jobs:
   build:
@@ -21,133 +18,51 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+      - name: Show cmake
+        shell: cmd
+        run: cmake --version
 
-      - name: Show toolchain
-        shell: pwsh
+      - name: Configure CMake (VS 2022)
+        shell: cmd
         run: |
-          cmake --version
-          where.exe cl
-          where.exe cmake
-          cl 2>&1 | Select-Object -First 3
-
-      - name: Install Ninja
-        shell: pwsh
-        run: |
-          choco install ninja -y --no-progress
-          ninja --version
-
-      - name: Configure CMake
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Continue"
-          git config --global core.longpaths true
-
-          function Invoke-Configure([string[]]$extra) {
-            if (Test-Path build) { Remove-Item -Recurse -Force build }
-            $args = @(
-              "-B", "build",
-              "-G", "Ninja",
-              "-DCMAKE_BUILD_TYPE=Release",
-              "-DCMAKE_C_COMPILER=cl",
-              "-DCMAKE_CXX_COMPILER=cl",
-              "-DMUK_BUILD_SAMPLES=OFF",
-              "-DMUK_BUILD_EDITOR=ON",
-              "-DMUK_USE_JOLT=OFF"
-            ) + $extra
-            Write-Host "cmake $($args -join ' ')"
-            & cmake @args
-            return ($LASTEXITCODE -eq 0)
-          }
-
-          # Attempt 1: full features (ImGui + tinygltf)
-          $ok = Invoke-Configure @("-DMUK_USE_IMGUI=ON", "-DMUK_USE_TINYGLTF=ON")
-          if (-not $ok) {
-            Write-Host "Full configure failed — retry without FetchContent deps"
-            $ok = Invoke-Configure @("-DMUK_USE_IMGUI=OFF", "-DMUK_USE_TINYGLTF=OFF")
-          }
-          if (-not $ok) {
-            Write-Host "Ninja failed — try VS 17 2022 generator"
-            if (Test-Path build) { Remove-Item -Recurse -Force build }
-            & cmake -B build -G "Visual Studio 17 2022" -A x64 `
-              -DMUK_USE_IMGUI=OFF -DMUK_USE_TINYGLTF=OFF -DMUK_USE_JOLT=OFF `
-              -DMUK_BUILD_SAMPLES=OFF -DMUK_BUILD_EDITOR=ON
-            $ok = ($LASTEXITCODE -eq 0)
-            if ($ok) { "USE_VS=1" | Out-File $env:GITHUB_ENV -Append -Encoding utf8 }
-          } else {
-            "USE_NINJA=1" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          }
-          if (-not $ok) {
-            if (Test-Path build/CMakeFiles/CMakeOutput.log) { Get-Content build/CMakeFiles/CMakeOutput.log -Tail 80 }
-            if (Test-Path build/CMakeFiles/CMakeError.log) { Get-Content build/CMakeFiles/CMakeError.log -Tail 80 }
-            Write-Error "CMake configure failed"
-            exit 1
-          }
-          Write-Host "Configure OK"
+          cmake -B build -G "Visual Studio 17 2022" -A x64 -DMUK_USE_IMGUI=OFF -DMUK_USE_TINYGLTF=OFF -DMUK_USE_JOLT=OFF -DMUK_BUILD_SAMPLES=OFF -DMUK_BUILD_EDITOR=ON
+          if errorlevel 1 (
+            echo ===== CMakeOutput =====
+            if exist build\CMakeFiles\CMakeOutput.log type build\CMakeFiles\CMakeOutput.log
+            echo ===== CMakeError =====
+            if exist build\CMakeFiles\CMakeError.log type build\CMakeFiles\CMakeError.log
+            exit /b 1
+          )
 
       - name: Build Release
-        shell: pwsh
-        run: |
-          if ($env:USE_VS -eq "1") {
-            cmake --build build --config Release --parallel 4
-          } else {
-            cmake --build build --parallel 4
-          }
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        shell: cmd
+        run: cmake --build build --config Release --parallel 4
 
       - name: Locate binaries
         id: bins
         shell: pwsh
         run: |
-          $foundEditor = $null
-          $foundRuntime = $null
-          Get-ChildItem -Path build -Recurse -Filter "MukEditor.exe" -ErrorAction SilentlyContinue |
-            ForEach-Object { if (-not $foundEditor) { $foundEditor = $_.FullName } }
-          Get-ChildItem -Path build -Recurse -Filter "MukRuntime.exe" -ErrorAction SilentlyContinue |
-            ForEach-Object { if (-not $foundRuntime) { $foundRuntime = $_.FullName } }
-          Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue |
-            ForEach-Object { Write-Host "EXE: $($_.FullName)" }
-          if (-not $foundEditor) {
-            # accept any editor-named fallback
-            $any = Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -match "Muk|Editor" } | Select-Object -First 1
-            if ($any) { $foundEditor = $any.FullName }
-          }
-          if (-not $foundEditor) {
-            Write-Error "MukEditor.exe not found"
-            exit 1
-          }
-          Write-Host "Editor: $foundEditor"
-          "editor=$foundEditor" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
-          if ($foundRuntime) { "runtime=$foundRuntime" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+          $found = Get-ChildItem -Path build -Recurse -Filter "MukEditor.exe" | Select-Object -First 1
+          if (-not $found) { Get-ChildItem -Path build -Recurse -Filter "*.exe" | ForEach-Object { $_.FullName }; throw "MukEditor.exe missing" }
+          Write-Host "Found $($found.FullName)"
+          "editor=$($found.FullName)" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $rt = Get-ChildItem -Path build -Recurse -Filter "MukRuntime.exe" | Select-Object -First 1
+          if ($rt) { "runtime=$($rt.FullName)" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8 }
 
       - name: Stage install package
         shell: pwsh
         run: |
           $out = "MukGameEngine-Windows-x64"
-          New-Item -ItemType Directory -Force -Path "$out/bin","$out/config","$out/Assets/Scripts","$out/Assets/Scenes" | Out-Null
-          $editor = "${{ steps.bins.outputs.editor }}"
-          $runtime = "${{ steps.bins.outputs.runtime }}"
-          Copy-Item $editor "$out/bin/MukEditor.exe" -Force
-          Copy-Item $editor "$out/bin/Muk Game Engine.exe" -Force
-          if ($runtime) { Copy-Item $runtime "$out/bin/MukRuntime.exe" -Force }
-          $dir = Split-Path $editor -Parent
+          New-Item -ItemType Directory -Force -Path "$out/bin" | Out-Null
+          Copy-Item "${{ steps.bins.outputs.editor }}" "$out/bin/MukEditor.exe" -Force
+          Copy-Item "${{ steps.bins.outputs.editor }}" "$out/bin/Muk Game Engine.exe" -Force
+          if ("${{ steps.bins.outputs.runtime }}") {
+            Copy-Item "${{ steps.bins.outputs.runtime }}" "$out/bin/MukRuntime.exe" -Force
+          }
+          $dir = Split-Path "${{ steps.bins.outputs.editor }}" -Parent
           Get-ChildItem $dir -Filter "*.dll" -ErrorAction SilentlyContinue | Copy-Item -Destination "$out/bin/" -Force
-          Copy-Item README.md,LICENSE,ROADMAP.md $out/ -ErrorAction SilentlyContinue
-          @"
-          Muk Game Engine (Windows x64)
-          =============================
-          1. Unzip this folder
-          2. Run bin\Muk Game Engine.exe  (or MukEditor.exe)
-          3. Optional: put API keys in config (OpenRouter / NVIDIA)
-
-          Note: This is a Windows desktop app, not an Android APK.
-          "@ | Set-Content "$out/INSTALL.txt"
-          if (-not (Test-Path "$out/bin/MukEditor.exe")) { exit 1 }
-          Write-Host "Package staged OK"
+          Copy-Item README.md $out/ -ErrorAction SilentlyContinue
+          "Run bin\MukEditor.exe (Windows app, not Android APK)" | Set-Content "$out/INSTALL.txt"
 
       - name: Upload Windows app artifact
         uses: actions/upload-artifact@v4
