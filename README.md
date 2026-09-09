@@ -1,43 +1,34 @@
-# Muk Game Engine v0.12
+# Muk Game Engine v0.13
 
 https://github.com/JagX-JRILICENSE/MukGameEngine
 
-## Roadmap next-5 (done)
+Open DX12 C++ engine with an **AI-native editor**. Not a claim that every Unreal/Unity subsystem is matched — it is a fast, modern stack plus capabilities those tools do not ship by default (multi-provider AI game builder, async agents, undoable AI spawns).
 
-1. **GPU skinning path** — `Skin.hlsl` + `SkinCBData` bone buffer (`SkinGPU.h`)
-2. **Bloom extract** — bright-pass helper + live bloom strength in lighting
-3. **Cubemap IBL** — procedural 6-face environment (`IBLCubemap`)
-4. **Prefab spawn panel** — spawn Cube/Pillar/Orb/Floor/Player from Prefabs UI
-5. **AI tools** — `tool_focus`, `tool_select`, `tool_orbit`, `tool_frame`
+## Why Muk is competitive
 
-## +15 more systems
+| Area | Muk advantage |
+|------|----------------|
+| AI | Multi-agent OpenRouter + NVIDIA build/playtest/fix loop in-editor |
+| Weight | Single static lib + editor exe; no multi-GB launcher |
+| Scripting | Muk Script + visual graph data model + hot reload (F9) |
+| Iteration | AI spawn undo, async AI, package.manifest, analytics |
+| Rendering | Cascades, IBL cubemap, bloom, SSAO/DOF/grade settings, frustum+LOD |
+| World | Navmesh, partition streaming, foliage+wind, water, terrain heightfield |
+| Cinema | Timeline camera sequencer |
+| Input | XInput gamepad + rebind map |
+| Net | Local-authority multiplayer scaffold |
 
-6. Trigger volumes (goal zone enter)
-7. PIE + script hot-reload (**F9**)
-8. `.mukscene` save/load via console & Content Browser
-9. Console commands (`help`, `spawn_prefab`, `save`, `load`, `time`, `snap`)
-10. Project settings (snap, fog, day/night)
-11. Grid snap on gizmo end + Duplicate (**Ctrl+D**)
-12. Selection highlight (gold tint)
-13. Camera orbit (**Q/E**)
-14. Game timers
-15. Localization string table
-16. FPS history graph
-17. Frame selection toolbar
-18. Day/night light factor
-19. Content Browser opens scripts/scenes
-20. Skin bone CB filled each frame (GPU-ready)
+## v0.13 systems (~40 upgrades)
 
-### Controls
-| Key | Action |
-|-----|--------|
-| WASD | Move |
-| Q/E | Orbit camera |
-| F5 | Play-In-Editor |
-| F9 | Hot-reload script |
-| F12 | Screenshot |
-| Ctrl+Z | Undo (incl. AI batch) |
-| Ctrl+D | Duplicate selected |
+**Rendering:** frustum cull, LOD tiers, SSAO/DOF/motion blur/color grade stack, selection multi-tint, water plane, wind-animated foliage  
+**Animation:** state machine, two-bone IK, GPU SkinCB + Skin.hlsl  
+**World:** navmesh bake, world partition, heightfield terrain, vegetation scatter  
+**Editor:** Feature Hub panel, multi-select, cinematic timeline, package manifest  
+**Input/Net:** gamepad, rebind, local net host/bots  
+**Ops:** crash log, analytics events, visual script graph  
+**ECS:** Tag/Layer/Billboard/LOD radius components  
+
+Open **Feature Hub v0.13** in the editor for live controls.
 
 ### Build
 ```powershell
