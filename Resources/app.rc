@@ -1,7 +1,7 @@
 #include <winver.h>
 
 #define VER_MAJOR 0
-#define VER_MINOR 13
+#define VER_MINOR 14
 #define VER_PATCH 0
 
 VS_VERSION_INFO VERSIONINFO
@@ -19,12 +19,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Muk Game Engine"
             VALUE "FileDescription", "Muk Game Engine Editor"
-            VALUE "FileVersion", "0.13.0"
+            VALUE "FileVersion", "0.14.0"
             VALUE "InternalName", "MukEditor"
             VALUE "LegalCopyright", "MIT"
             VALUE "OriginalFilename", "MukEditor.exe"
             VALUE "ProductName", "Muk Game Engine"
-            VALUE "ProductVersion", "0.13.0"
+            VALUE "ProductVersion", "0.14.0"
         END
     END
     BLOCK "VarFileInfo"
