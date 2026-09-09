@@ -1,18 +1,19 @@
 # Muk Roadmap
 
-## Done (v0.13)
+## Done (v0.14)
 
-Large batch: Feature Hub, frustum+LOD, post stack, anim SM + IK, navmesh,
-world partition, terrain+water, foliage+wind, gamepad+rebind, local net,
-timeline/cinematics, visual graph, analytics, package manifest, tags/layers.
+- GPU Skin PSO (`DX12SkinPSO`)
+- Fullscreen SSAO + bloom (`DX12PostFX`)
+- Node Graph canvas UI
+- UDP multiplayer (`UdpNet`)
+- Animation montages / blend / layers / notifies
+- Plugin ecosystem registry
+- 15 advanced gameplay systems
 
-## Next (production polish)
+## Next
 
-1. Wire Skin.hlsl into DX12 PSO and draw real skinned meshes
-2. Full-screen SSAO + bloom blur on SceneRT
-3. Sample IBL cubemap in pixel shader
-4. Box-select in viewport with MultiSelect
-5. Serialize Tag/Layer in .mukscene
-6. Real UDP replication for LocalNet
-7. Visual graph editor canvas (ImGui nodes)
-8. Bake terrain mesh to GPU
+1. Hook PostFX + SkinPSO into Renderer::EndSceneRT / draw path end-to-end
+2. Depth-aware SSAO (use scene depth SRV)
+3. Multi-mip bloom
+4. Reliable UDP + interest management
+5. Marketplace-style package browser for plugins
