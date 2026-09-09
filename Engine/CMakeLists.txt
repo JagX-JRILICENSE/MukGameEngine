@@ -37,6 +37,7 @@ set(ENGINE_SOURCES
     Scene/SceneSerializer.cpp
     Scene/Prefab.cpp
     Animation/Skeleton.cpp
+    Animation/Skinning.cpp
     Audio/AudioSystem.cpp
     Reflection/Reflection.cpp
     Script/GameplayScript.cpp
@@ -50,6 +51,7 @@ set(ENGINE_HEADERS
     Core/Window.h
     Core/Core.h
     Core/Profiler.h
+    Core/AppIcon.h
     Math/Vector.h
     Math/Matrix.h
     Math/Math.h
@@ -89,6 +91,8 @@ set(ENGINE_HEADERS
     Scene/SceneSerializer.h
     Scene/Prefab.h
     Animation/Skeleton.h
+    Animation/Skinning.h
+    Navigation/GridPath.h
     Audio/AudioSystem.h
     Reflection/Reflection.h
     Script/GameplayScript.h
