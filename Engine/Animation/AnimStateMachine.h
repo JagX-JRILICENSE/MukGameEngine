@@ -6,12 +6,13 @@
 #include <unordered_map>
 #include <vector>
 #include <cmath>
+#include <algorithm>
 
 namespace Muk {
 
 struct AnimTransition {
     std::string ToState;
-    std::string ConditionVar; // float var name
+    std::string ConditionVar;
     float Threshold = 0.5f;
     bool Greater = true;
     float BlendTime = 0.15f;
@@ -67,7 +68,6 @@ private:
     float m_Time = 0;
 };
 
-/** Two-bone IK (upper, lower, end effector target) */
 struct TwoBoneIK {
     static void Solve(Vec3 root, float lenA, float lenB, const Vec3& target,
                       Vec3& midOut, Vec3& endOut) {
@@ -78,7 +78,6 @@ struct TwoBoneIK {
         cosA = std::clamp(cosA, -1.f, 1.f);
         float angle = std::acos(cosA);
         Vec3 dir = { to.x / dist, to.y / dist, to.z / dist };
-        // bend in plane with up
         Vec3 up{ 0, 1, 0 };
         Vec3 side{ dir.y*up.z - dir.z*up.y, dir.z*up.x - dir.x*up.z, dir.x*up.y - dir.y*up.x };
         float sl = std::sqrt(side.x*side.x+side.y*side.y+side.z*side.z);
