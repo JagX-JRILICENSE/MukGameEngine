@@ -1,5 +1,6 @@
 #include "Window.h"
 #include "Log.h"
+#include "AppIcon.h"
 
 #ifdef MUK_PLATFORM_WINDOWS
 #include <Windows.h>
@@ -32,18 +33,22 @@ bool Window::Create(const WindowProps& props) {
 
     HINSTANCE hInstance = GetModuleHandle(nullptr);
 
+    HICON appIcon = CreateMukAppIcon(32);
+    HICON appIconSm = CreateMukAppIcon(16);
+    if (!appIcon) appIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    if (!appIconSm) appIconSm = appIcon;
+
     WNDCLASSEX wc = {};
     wc.cbSize = sizeof(WNDCLASSEX);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-    wc.hIconSm = LoadIcon(nullptr, IDI_APPLICATION);
+    wc.hIcon = appIcon;
+    wc.hIconSm = appIconSm;
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszClassName = L"MukWindowClass";
 
-    // Re-register if needed
     UnregisterClass(L"MukWindowClass", hInstance);
     if (!RegisterClassEx(&wc)) {
         MUK_CORE_ERROR("Failed to register window class");
@@ -72,9 +77,8 @@ bool Window::Create(const WindowProps& props) {
         return false;
     }
 
-    // Ensure big/small icons on the window
-    SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)wc.hIcon);
-    SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)wc.hIconSm);
+    SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)appIcon);
+    SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)appIconSm);
 
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
@@ -83,7 +87,7 @@ bool Window::Create(const WindowProps& props) {
     m_Created = true;
     m_ShouldClose = false;
 
-    MUK_CORE_INFO("Window created: {0}x{1} - {2}", props.Width, props.Height, props.Title.c_str());
+    MUK_CORE_INFO("Window created: {0}x{1} - {2} (Muk icon)", props.Width, props.Height, props.Title.c_str());
     return true;
 #else
     MUK_CORE_ERROR("Window creation not implemented for this platform");
@@ -115,8 +119,7 @@ void Window::PollEvents() {
 #endif
 }
 
-void Window::SwapBuffers() {
-}
+void Window::SwapBuffers() {}
 
 void Window::SetVSync(bool enabled) {
     m_Data.VSync = enabled;
