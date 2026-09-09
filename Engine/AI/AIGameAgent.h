@@ -16,6 +16,7 @@ class Renderer;
 class AudioSystem;
 class ParticleSystem;
 class ContentBrowser;
+class UndoStack;
 struct EditorEntityInfo;
 
 enum class AgentPhase {
@@ -41,6 +42,7 @@ class AIGameAgent {
 public:
     void SetClient(AIClient* client);
     void SetSettings(const UserSettings& settings);
+    void SetUndoStack(UndoStack* undo) { m_Undo = undo; }
 
     void StartBuild(const std::string& userBrief);
     void Cancel();
@@ -78,6 +80,7 @@ private:
     void HandleAsyncResults(World& world, Renderer& renderer, AudioSystem* audio,
                             std::vector<EditorEntityInfo>& entities, Entity& selected,
                             ParticleSystem* particles);
+    void FinishBatch(std::vector<EditorEntityInfo>* entities);
 
     std::string ExtractBlock(const std::string& text, const std::string& beginTag, const std::string& endTag) const;
     std::string ExtractScript(const std::string& text) const;
@@ -85,6 +88,7 @@ private:
     MultiAgentTeam m_Team;
     AsyncAI m_Async;
     GameRuntime m_Runtime;
+    UndoStack* m_Undo = nullptr;
     AgentPhase m_Phase = AgentPhase::Idle;
     bool m_WaitingAsync = false;
     std::string m_Brief;
