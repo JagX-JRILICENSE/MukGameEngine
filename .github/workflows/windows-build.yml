@@ -9,42 +9,61 @@ jobs:
   build:
     name: Build Muk (Windows x64)
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure CMake
+      - name: Configure CMake (real app)
         shell: cmd
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64 -DMUK_CI_STUB=ON
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 ^
+            -DMUK_CI_STUB=OFF ^
+            -DMUK_BUILD_EDITOR=ON ^
+            -DMUK_USE_IMGUI=OFF ^
+            -DMUK_USE_TINYGLTF=OFF ^
+            -DMUK_USE_JOLT=OFF ^
+            -DMUK_BUILD_SAMPLES=OFF
 
       - name: Build Release
         shell: cmd
-        run: cmake --build build --config Release --parallel 4
+        run: |
+          cmake --build build --config Release --parallel 4 -- /v:m
+          if errorlevel 1 (
+            echo BUILD FAILED
+            exit /b 1
+          )
 
-      - name: Package
+      - name: Package real app
         shell: pwsh
         run: |
-          $found = Get-ChildItem -Path build -Recurse -Filter "MukEditor.exe" | Select-Object -First 1
-          if (-not $found) { throw "MukEditor.exe missing" }
+          $editor = Get-ChildItem -Path build -Recurse -Filter "MukEditor.exe" | Select-Object -First 1
+          $runtime = Get-ChildItem -Path build -Recurse -Filter "MukRuntime.exe" | Select-Object -First 1
+          if (-not $editor) { throw "MukEditor.exe not found — real app build failed" }
+          $size = (Get-Item $editor.FullName).Length
+          Write-Host "MukEditor.exe size = $size bytes"
+          if ($size -lt 50000) { throw "Exe too small — looks like a stub ($size bytes)" }
           $out = "MukGameEngine-Windows-x64"
           New-Item -ItemType Directory -Force -Path "$out/bin" | Out-Null
-          Copy-Item $found.FullName "$out/bin/MukEditor.exe"
-          Copy-Item $found.FullName "$out/bin/Muk Game Engine.exe"
+          Copy-Item $editor.FullName "$out/bin/MukEditor.exe"
+          Copy-Item $editor.FullName "$out/bin/Muk Game Engine.exe"
+          if ($runtime) { Copy-Item $runtime.FullName "$out/bin/MukRuntime.exe" }
+          $dir = Split-Path $editor.FullName -Parent
+          Get-ChildItem $dir -Filter "*.dll" -EA SilentlyContinue | Copy-Item -Destination "$out/bin/" -Force
           @"
-          Muk Game Engine — Windows package
-          ==================================
-          Run:  bin\MukEditor.exe
+          Muk Game Engine — REAL Windows application
+          ==========================================
+          1. Extract this zip
+          2. Double-click:  bin\Muk Game Engine.exe
+             (or MukEditor.exe)
 
-          This CI build is a verified Windows executable package.
-          It is NOT an Android APK (this engine targets Windows PC).
+          You should get a window titled "Muk Game Engine"
+          with a 3D scene (floor + cubes, orbiting camera).
 
-          Full DX12 editor source: https://github.com/JagX-JRILICENSE/MukGameEngine
-          Local full build:
-            cmake -B build -G "Visual Studio 17 2022" -A x64 -DMUK_CI_STUB=OFF -DMUK_USE_IMGUI=ON
-            cmake --build build --config Release
+          This is a Windows DirectX 12 desktop app (not Android APK).
           "@ | Set-Content "$out/INSTALL.txt"
-          Copy-Item README.md $out/ -ErrorAction SilentlyContinue
+          Copy-Item README.md $out/ -EA SilentlyContinue
+          Write-Host "Packaged real app OK ($size bytes)"
 
       - uses: actions/upload-artifact@v4
         with:
