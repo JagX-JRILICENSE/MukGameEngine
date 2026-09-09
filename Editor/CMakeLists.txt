@@ -35,11 +35,10 @@ target_compile_definitions(MukEditor PRIVATE
 )
 
 if(WIN32)
-  target_link_libraries(MukEditor PRIVATE
-    d3d12 dxgi d3dcompiler user32 gdi32
-  )
-  # Dynamic CRT to avoid ImGui + MSVC /MT conflicts on CI
+  target_link_libraries(MukEditor PRIVATE d3d12 dxgi d3dcompiler user32 gdi32 shell32)
   target_compile_options(MukEditor PRIVATE /W3 /EHsc /O2 /MD)
+  # CRITICAL: Windows GUI app — never open a console/terminal
+  target_link_options(MukEditor PRIVATE /SUBSYSTEM:WINDOWS)
   set_target_properties(MukEditor PROPERTIES
     OUTPUT_NAME "MukEditor"
     WIN32_EXECUTABLE TRUE
