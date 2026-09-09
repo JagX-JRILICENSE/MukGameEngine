@@ -1,17 +1,17 @@
 # Muk Roadmap
 
-## Done (v0.10)
+## Done (v0.11)
 
-- Fully async multi-agent AI
-- SceneRT GPU screenshots (F12)
-- Collectible + Collector components
-- Particle system bursts
-- AI script/level autosave + Content Browser `.muk`
+- Embedded Muk app icon
+- AI spawn batch undo (Ctrl+Z)
+- Grid A* pathfinding (enemy chase)
+- Bloom + hemisphere IBL post panel
+- Skeleton skinning debug draw
 
 ## Next
 
-1. Custom embedded `.ico`
-2. Navmesh / pathfinding
-3. Undo batch for AI spawns
-4. Bloom + cubemap IBL
-5. GPU skinning
+1. Full GPU skinned vertex shader path
+2. Real post-process bloom pass (mip blur)
+3. Cubemap IBL textures
+4. Prefab drag from Content Browser
+5. Multi-agent tool-use / cursor control polish
