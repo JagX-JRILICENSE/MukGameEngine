@@ -1,4 +1,3 @@
-# Minimal reliable sources for Windows CI (expand later)
 set(ENGINE_SOURCES
     Core/Application.cpp
     Core/Log.cpp
@@ -20,26 +19,14 @@ set(ENGINE_SOURCES
     Physics/PhysicsWorld.cpp
     Physics/CharacterController.cpp
     Asset/AssetManager.cpp
-    EditorUI/EditorUI.cpp
-    EditorUI/ViewportGizmo.cpp
-    Editor/UndoStack.cpp
-    Editor/PlayInEditor.cpp
-    Editor/Screenshot.cpp
-    AI/UserSettings.cpp
-    AI/AIClient.cpp
-    AI/AIControlPanel.cpp
-    Scene/Prefab.cpp
-    Scene/SceneSerializer.cpp
-    Audio/AudioSystem.cpp
-    Particles/ParticleSystem.cpp
-    Gameplay/Collectible.cpp
+    Asset/GltfLoader.cpp
 )
 
 add_library(MukEngine STATIC ${ENGINE_SOURCES})
 target_include_directories(MukEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
-    target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler winhttp shell32 ole32)
+    target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler)
 endif()
 
 if(MUK_USE_IMGUI)
@@ -52,12 +39,16 @@ if(MUK_USE_IMGUI)
         ${imgui_SOURCE_DIR}/imgui_widgets.cpp
         ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
         ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp
-        ${imguizmo_SOURCE_DIR}/ImGuizmo.cpp)
+        ${imguizmo_SOURCE_DIR}/ImGuizmo.cpp
+        EditorUI/EditorUI.cpp
+        EditorUI/ViewportGizmo.cpp
+    )
+endif()
+
+if(MUK_USE_TINYGLTF)
+    target_include_directories(MukEngine PUBLIC ${tinygltf_SOURCE_DIR})
 endif()
 
 if(MUK_USE_JOLT)
     target_link_libraries(MukEngine PUBLIC Jolt)
-endif()
-if(MUK_USE_TINYGLTF)
-    target_include_directories(MukEngine PUBLIC ${tinygltf_SOURCE_DIR})
 endif()
