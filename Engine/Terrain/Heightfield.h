@@ -4,6 +4,7 @@
 #include <vector>
 #include <cmath>
 #include <string>
+#include <algorithm>
 
 namespace Muk {
 
@@ -36,7 +37,8 @@ public:
                 Vertex v;
                 v.Position = { origin + x * step, Sample(x, z), origin + z * step };
                 v.Normal = { 0, 1, 0 };
-                v.UV = { (float)x / (m_Res - 1), (float)z / (m_Res - 1) };
+                v.TexCoord = { (float)x / (m_Res - 1), (float)z / (m_Res - 1) };
+                v.Color = {1,1,1,1};
                 mesh.Vertices.push_back(v);
             }
         for (int z = 0; z < m_Res - 1; ++z)
@@ -66,9 +68,7 @@ struct WaterPlane {
     float Opacity = 0.65f;
     float WaveSpeed = 1.2f;
     float Time = 0;
-
     void Update(float dt) { Time += dt * WaveSpeed; }
-
     Mat4 WorldMatrix(float size = 40.f) const {
         float bob = std::sin(Time) * 0.05f;
         return Mat4::Translation({ 0, Height + bob, 0 }) * Mat4::Scale({ size, 0.05f, size });
