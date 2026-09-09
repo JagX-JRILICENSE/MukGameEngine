@@ -11,6 +11,8 @@
 #include <string>
 #include <functional>
 
+struct ID3D12Resource;
+
 namespace Muk {
 
 class DX12Pipeline;
@@ -45,7 +47,6 @@ public:
 
     void BeginShadowPass(const Vec3& focus, f32 radius = 40.0f);
     void EndShadowPass();
-    // Preferred: fills all 3 cascades
     void RenderAllShadowCascades(const std::function<void()>& drawScene);
     bool ShadowsEnabled() const;
 
@@ -58,6 +59,7 @@ public:
     void* GetSceneRTGpuHandle() const;
     u32 GetSceneRTWidth() const;
     u32 GetSceneRTHeight() const;
+    ID3D12Resource* GetSceneRTColorResource() const;
 
     RHI* GetRHI() const { return m_RHI.get(); }
     Mat4 GetViewProjection() const { return m_ViewProjection; }
