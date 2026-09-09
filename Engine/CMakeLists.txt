@@ -59,6 +59,7 @@ set(ENGINE_HEADERS
     Core/ProjectSettings.h
     Core/GameTimer.h
     Core/StringTable.h
+    Core/EngineServices.h
     Math/Vector.h
     Math/Matrix.h
     Math/Math.h
@@ -76,9 +77,12 @@ set(ENGINE_HEADERS
     Renderer/Material.h
     Renderer/Texture.h
     Renderer/PostSettings.h
+    Renderer/PostStack.h
     Renderer/IBLCubemap.h
+    Renderer/FrustumCulling.h
     Input/Input.h
     Input/InputActions.h
+    Input/Gamepad.h
     Physics/PhysicsWorld.h
     Physics/CharacterController.h
     Asset/AssetManager.h
@@ -89,6 +93,8 @@ set(ENGINE_HEADERS
     Editor/UndoStack.h
     Editor/PlayInEditor.h
     Editor/Screenshot.h
+    Editor/MultiSelect.h
+    Editor/FeatureHub.h
     AI/UserSettings.h
     AI/AIClient.h
     AI/AIControlPanel.h
@@ -99,10 +105,17 @@ set(ENGINE_HEADERS
     Scene/SceneRenderer.h
     Scene/SceneSerializer.h
     Scene/Prefab.h
+    Scene/Timeline.h
+    Scene/WorldPartition.h
     Animation/Skeleton.h
     Animation/Skinning.h
     Animation/SkinGPU.h
+    Animation/AnimStateMachine.h
     Navigation/GridPath.h
+    Navigation/NavMesh.h
+    Terrain/Heightfield.h
+    World/Vegetation.h
+    Net/LocalNet.h
     Audio/AudioSystem.h
     Reflection/Reflection.h
     Script/GameplayScript.h
@@ -117,7 +130,7 @@ add_library(MukEngine STATIC ${ENGINE_SOURCES} ${ENGINE_HEADERS})
 target_include_directories(MukEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
-    target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler winhttp shell32 ole32)
+    target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler winhttp shell32 ole32 xinput)
 endif()
 
 if(MUK_USE_IMGUI)
