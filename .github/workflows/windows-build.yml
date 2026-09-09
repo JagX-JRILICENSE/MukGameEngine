@@ -25,20 +25,35 @@ jobs:
       - name: Package real app
         shell: pwsh
         run: |
-          Write-Host "Listing all EXEs under build:"
           $all = @(Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue)
-          foreach ($f in $all) { Write-Host "  $($f.FullName)  size=$($f.Length)" }
+          foreach ($f in $all) { Write-Host "EXE: $($f.FullName)  $($f.Length) bytes" }
           if ($all.Count -eq 0) { throw "No .exe produced" }
-          # Prefer MukEditor, else largest exe
-          $exe = $all | Where-Object { $_.Name -match 'Muk' } | Select-Object -First 1
+          $exe = $all | Where-Object { $_.Name -match 'Muk' } | Sort-Object Length -Descending | Select-Object -First 1
           if (-not $exe) { $exe = $all | Sort-Object Length -Descending | Select-Object -First 1 }
-          Write-Host "Packaging: $($exe.FullName) ($($exe.Length) bytes)"
+          Write-Host "Selected: $($exe.FullName) size=$($exe.Length)"
+          # Real /MT DX12 app should be well above MessageBox stub (~10KB)
+          if ($exe.Length -lt 100000) {
+            throw "Refusing to ship tiny exe ($($exe.Length) bytes). Expected >100KB real app."
+          }
           $out = "MukGameEngine-Windows-x64"
           New-Item -ItemType Directory -Force -Path "$out/bin" | Out-Null
           Copy-Item $exe.FullName "$out/bin/MukEditor.exe" -Force
           Copy-Item $exe.FullName "$out/bin/Muk Game Engine.exe" -Force
-          "Muk Game Engine - Windows DX12 app`nRun bin\Muk Game Engine.exe`nExpect a window with a colored triangle." | Set-Content "$out/INSTALL.txt"
-          Get-ChildItem $out -Recurse | ForEach-Object { Write-Host $_.FullName }
+          @"
+          Muk Game Engine — REAL Windows DirectX 12 app
+          ==============================================
+          Size of exe should be 100KB+ (not 13–17KB stub).
+
+          Run:  bin\Muk Game Engine.exe
+
+          You should see:
+            - Window titled "Muk Game Engine | DX12 Demo"
+            - Dark scene with colored cubes on a floor
+            - Camera slowly orbiting
+            - FPS in the title bar
+            - ESC to quit
+          "@ | Set-Content "$out/INSTALL.txt"
+          Write-Host "Package OK — $($exe.Length) bytes"
 
       - uses: actions/upload-artifact@v4
         with:
