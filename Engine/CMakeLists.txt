@@ -1,3 +1,4 @@
+# Minimal reliable sources for Windows CI (expand later)
 set(ENGINE_SOURCES
     Core/Application.cpp
     Core/Log.cpp
@@ -13,18 +14,12 @@ set(ENGINE_SOURCES
     RHI/DX12/DX12Texture.cpp
     RHI/DX12/DX12SceneRT.cpp
     RHI/DX12/DX12ShadowMap.cpp
-    RHI/DX12/DX12PostFX.cpp
-    RHI/DX12/DX12SkinPSO.cpp
     Renderer/Renderer.cpp
     Renderer/Mesh.cpp
-    Renderer/IBLCubemap.cpp
     Input/Input.cpp
-    Input/InputActions.cpp
     Physics/PhysicsWorld.cpp
     Physics/CharacterController.cpp
     Asset/AssetManager.cpp
-    Asset/GltfLoader.cpp
-    Asset/ContentBrowser.cpp
     EditorUI/EditorUI.cpp
     EditorUI/ViewportGizmo.cpp
     Editor/UndoStack.cpp
@@ -33,69 +28,28 @@ set(ENGINE_SOURCES
     AI/UserSettings.cpp
     AI/AIClient.cpp
     AI/AIControlPanel.cpp
-    AI/AIGameAgent.cpp
-    AI/MultiAgentTeam.cpp
-    AI/AsyncAI.cpp
-    AI/AITools.cpp
-    Scene/SceneRenderer.cpp
-    Scene/SceneSerializer.cpp
     Scene/Prefab.cpp
-    Animation/Skeleton.cpp
-    Animation/Skinning.cpp
+    Scene/SceneSerializer.cpp
     Audio/AudioSystem.cpp
-    Reflection/Reflection.cpp
-    Script/GameplayScript.cpp
-    Gameplay/Collectible.cpp
-    Gameplay/TriggerVolume.cpp
     Particles/ParticleSystem.cpp
+    Gameplay/Collectible.cpp
 )
 
-set(ENGINE_HEADERS
-    Core/Application.h Core/Log.h Core/Window.h Core/Core.h Core/Profiler.h
-    Core/AppIcon.h Core/ConsoleCommands.h Core/ProjectSettings.h
-    Core/GameTimer.h Core/StringTable.h Core/EngineServices.h Core/PluginAPI.h
-    Math/Vector.h Math/Matrix.h Math/Math.h
-    ECS/World.h ECS/Entity.h ECS/Component.h
-    RHI/RHI.h
-    RHI/DX12/DX12RHI.h RHI/DX12/DX12Pipeline.h RHI/DX12/DX12Texture.h
-    RHI/DX12/DX12SceneRT.h RHI/DX12/DX12ShadowMap.h
-    RHI/DX12/DX12PostFX.h RHI/DX12/DX12SkinPSO.h
-    Renderer/Renderer.h Renderer/Mesh.h Renderer/Material.h Renderer/Texture.h
-    Renderer/PostSettings.h Renderer/PostStack.h Renderer/IBLCubemap.h Renderer/FrustumCulling.h
-    Input/Input.h Input/InputActions.h Input/Gamepad.h
-    Physics/PhysicsWorld.h Physics/CharacterController.h
-    Asset/AssetManager.h Asset/GltfLoader.h Asset/ContentBrowser.h
-    EditorUI/EditorUI.h EditorUI/ViewportGizmo.h
-    Editor/UndoStack.h Editor/PlayInEditor.h Editor/Screenshot.h
-    Editor/MultiSelect.h Editor/FeatureHub.h Editor/NodeGraphCanvas.h
-    AI/UserSettings.h AI/AIClient.h AI/AIControlPanel.h AI/AIGameAgent.h
-    AI/MultiAgentTeam.h AI/AsyncAI.h AI/AITools.h
-    Scene/SceneRenderer.h Scene/SceneSerializer.h Scene/Prefab.h
-    Scene/Timeline.h Scene/WorldPartition.h
-    Animation/Skeleton.h Animation/Skinning.h Animation/SkinGPU.h
-    Animation/AnimStateMachine.h Animation/AnimMontage.h
-    Navigation/GridPath.h Navigation/NavMesh.h
-    Terrain/Heightfield.h World/Vegetation.h
-    Net/LocalNet.h Net/UdpNet.h
-    Audio/AudioSystem.h Reflection/Reflection.h Script/GameplayScript.h
-    Gameplay/Collectible.h Gameplay/TriggerVolume.h Gameplay/AdvancedSystems.h
-    Particles/ParticleSystem.h Engine.h
-)
-
-add_library(MukEngine STATIC ${ENGINE_SOURCES} ${ENGINE_HEADERS})
+add_library(MukEngine STATIC ${ENGINE_SOURCES})
 target_include_directories(MukEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
-    target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler winhttp shell32 ole32 xinput ws2_32)
+    target_link_libraries(MukEngine PUBLIC d3d12 dxgi dxguid d3dcompiler winhttp shell32 ole32)
 endif()
 
 if(MUK_USE_IMGUI)
     target_include_directories(MukEngine PUBLIC
         ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends ${imguizmo_SOURCE_DIR})
     target_sources(MukEngine PRIVATE
-        ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp
-        ${imgui_SOURCE_DIR}/imgui_tables.cpp ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-        ${imgui_SOURCE_DIR}/imgui_demo.cpp
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
         ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
         ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp
         ${imguizmo_SOURCE_DIR}/ImGuizmo.cpp)
