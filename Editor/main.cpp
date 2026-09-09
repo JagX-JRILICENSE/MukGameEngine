@@ -3,6 +3,7 @@
 #include "EditorUI/ViewportGizmo.h"
 #include "Editor/UndoStack.h"
 #include "Editor/PlayInEditor.h"
+#include "Editor/Screenshot.h"
 #include "AI/AIControlPanel.h"
 #include "AI/AIGameAgent.h"
 #include "AI/UserSettings.h"
@@ -12,6 +13,8 @@
 #include "Audio/AudioSystem.h"
 #include "Animation/Skeleton.h"
 #include "Physics/CharacterController.h"
+#include "Gameplay/Collectible.h"
+#include "Particles/ParticleSystem.h"
 #include "Core/Profiler.h"
 #include "RHI/DX12/DX12RHI.h"
 
@@ -32,8 +35,7 @@ protected:
         m_UI.Initialize(Window().GetNativeHandle(), dx);
         m_AI.Initialize();
 
-        UserSettings s;
-        s.Load();
+        UserSettings s; s.Load();
         m_Agent.SetSettings(s);
 
         m_Audio.Initialize();
@@ -41,18 +43,13 @@ protected:
         m_Content.SetRoot("Assets");
         m_Content.Rescan();
 
-        CameraView cam;
-        cam.Eye = {0.0f, 3.0f, -8.0f};
-        cam.Target = {0.0f, 0.5f, 0.0f};
-        Renderer().SetCamera(cam);
+        Renderer().SetCamera({ {0.0f, 3.0f, -8.0f}, {0.0f, 0.5f, 0.0f} });
 
         {
             auto e = ECS().CreateEntity();
             ECS().AddComponent<NameComponent>(e).Name = "Sun";
             auto& L = ECS().AddComponent<DirectionalLight>(e);
-            L.Direction = {0.45f, -1.0f, 0.35f};
-            L.Intensity = 1.5f;
-            L.Ambient = 0.18f;
+            L.Direction = {0.45f, -1.0f, 0.35f}; L.Intensity = 1.5f; L.Ambient = 0.18f;
             Track(e, "Sun");
         }
 
@@ -60,122 +57,102 @@ protected:
             auto e = ECS().CreateEntity();
             ECS().AddComponent<NameComponent>(e).Name = "Floor";
             auto& t = ECS().AddComponent<Transform>(e);
-            t.Position = {0, -0.1f, 0};
-            t.Scale = {12, 0.2f, 12};
+            t.Position = {0, -0.1f, 0}; t.Scale = {12, 0.2f, 12};
             ECS().AddComponent<MeshRenderer>(e).MeshName = "Cube";
             Track(e, "Floor");
-            RigidBodyDesc rb;
-            rb.Type = BodyType::Static;
-            rb.Shape = ShapeType::Box;
-            rb.Position = t.Position;
-            rb.HalfExtents = {6, 0.1f, 6};
+            RigidBodyDesc rb; rb.Type = BodyType::Static; rb.Shape = ShapeType::Box;
+            rb.Position = t.Position; rb.HalfExtents = {6, 0.1f, 6};
             ECS().AddComponent<RigidBodyComponent>(e).BodyId = Physics().CreateBody(rb);
         }
 
         {
             auto e = ECS().CreateEntity();
             ECS().AddComponent<NameComponent>(e).Name = "Cube";
-            auto& t = ECS().AddComponent<Transform>(e);
-            t.Position = {1.5f, 0.5f, 0};
+            auto& t = ECS().AddComponent<Transform>(e); t.Position = {1.5f, 0.5f, 0};
             ECS().AddComponent<MeshRenderer>(e).MeshName = "Cube";
-            Track(e, "Cube");
-            m_Selected = e;
+            Track(e, "Cube"); m_Selected = e;
         }
 
         {
-            auto e = ECS().CreateEntity();
-            ECS().AddComponent<NameComponent>(e).Name = "Triangle";
-            auto& t = ECS().AddComponent<Transform>(e);
-            t.Position = {-2, 0.5f, 0};
-            auto& mr = ECS().AddComponent<MeshRenderer>(e);
-            mr.MeshName = "Triangle";
-            mr.MaterialName = "CheckerMat";
-            Track(e, "Triangle");
-        }
-
-        {
-            CharacterDesc cd;
-            cd.Position = {0, 1.0f, 2};
+            CharacterDesc cd; cd.Position = {0, 1.0f, 2};
             m_Character.Create(Physics(), cd);
             auto e = ECS().CreateEntity();
             ECS().AddComponent<NameComponent>(e).Name = "Player";
             auto& t = ECS().AddComponent<Transform>(e);
-            t.Position = cd.Position;
-            t.Scale = {0.5f, 1.0f, 0.5f};
+            t.Position = cd.Position; t.Scale = {0.5f, 1.0f, 0.5f};
             ECS().AddComponent<MeshRenderer>(e).MeshName = "Cube";
-            Track(e, "Player");
-            m_PlayerEntity = e;
+            auto& coll = ECS().AddComponent<CollectorComponent>(e);
+            coll.TargetScore = 3;
+            Track(e, "Player"); m_PlayerEntity = e;
         }
 
-        if (auto tri = Assets().GetMesh("Triangle"))
-            Renderer().UploadMesh("Triangle", *tri);
+        // Demo orbs for collectible pipeline
+        CollectibleSystem::SpawnOrb(ECS(), { -2, 0.4f, 0 }, 1, &m_Entities);
+        CollectibleSystem::SpawnOrb(ECS(), { 2, 0.4f, 1 }, 1, &m_Entities);
+        CollectibleSystem::SpawnOrb(ECS(), { 0, 0.4f, -2 }, 1, &m_Entities);
+
+        m_Collect.SetOnCollect([&](Entity, int, int total) {
+            m_UI.Log("Collected! score=" + std::to_string(total));
+        });
+        m_Collect.SetOnComplete([&](int total) {
+            m_UI.Log("All orbs collected score=" + std::to_string(total));
+            m_Particles.Burst({ 0, 1, 0 }, 48, { 0.2f, 1.0f, 0.4f });
+        });
+
         if (auto cube = Assets().GetMesh("Cube"))
             Renderer().UploadMesh("Cube", *cube);
 
-        auto checker = Texture::CreateSolid(64, 64, 200, 180, 60);
-        for (u32 y = 0; y < 64; ++y)
-            for (u32 x = 0; x < 64; ++x) {
-                bool c = ((x / 8) + (y / 8)) & 1;
-                u32 i = (y * 64 + x) * 4;
-                checker->Pixels[i+0] = c ? 220 : 40;
-                checker->Pixels[i+1] = c ? 180 : 40;
-                checker->Pixels[i+2] = c ? 40 : 120;
-                checker->Pixels[i+3] = 255;
-            }
-        checker->Name = "Checker";
-        Renderer().UploadTexture("Checker", *checker);
-        m_CheckerMat = Material::CreateDefault();
-        m_CheckerMat.AlbedoMap = checker;
-        m_CheckerMat.AlbedoTexture = "Checker";
-
-        m_UI.Log("v0.8 multi-agent AI + Muk Script gameplay");
+        m_UI.Log("v0.10 async AI · collectibles · particles · GPU screenshots");
     }
 
     void OnUpdate(float dt) override {
 #ifdef MUK_PLATFORM_WINDOWS
-        static bool zWas = false, yWas = false, pWas = false, sWas = false;
+        static bool zWas=false,yWas=false,pWas=false,sWas=false,f12Was=false;
         bool zDown = (GetAsyncKeyState('Z') & 0x8000) != 0;
         bool yDown = (GetAsyncKeyState('Y') & 0x8000) != 0;
         bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
         bool pDown = (GetAsyncKeyState(VK_F5) & 0x8000) != 0;
         bool sDown = (GetAsyncKeyState('S') & 0x8000) != 0;
+        bool f12 = (GetAsyncKeyState(VK_F12) & 0x8000) != 0;
 
         if (ctrl && zDown && !zWas && !m_PIE.IsPlaying()) m_Undo.Undo(ECS());
         if (ctrl && yDown && !yWas && !m_PIE.IsPlaying()) m_Undo.Redo(ECS());
         if (pDown && !pWas) m_PIE.Toggle(ECS(), &m_Character);
         if (ctrl && sDown && !sWas)
             SceneSerializer::SaveWorld(ECS(), "Assets/Scenes/autosave.json", &m_Entities);
-        zWas = zDown; yWas = yDown; pWas = pDown; sWas = sDown;
+        if (f12 && !f12Was) {
+            Screenshot::CaptureSceneRT(Renderer(), "viewport");
+            m_UI.Log("Screenshot saved under Assets/Screenshots");
+            m_Content.Rescan();
+        }
+        zWas=zDown; yWas=yDown; pWas=pDown; sWas=sDown; f12Was=f12;
 #endif
 
         static float keyTimer = 0;
         keyTimer += dt;
         if (keyTimer > 2.0f) {
             keyTimer = 0;
-            UserSettings s; s.Load();
-            m_Agent.SetSettings(s);
+            UserSettings s; s.Load(); m_Agent.SetSettings(s);
         }
 
-        m_Agent.Tick(ECS(), Renderer(), &m_Audio, m_Entities, m_Selected);
-
-        // Continuous script play when runtime is playing (manual run)
-        if (m_Agent.Runtime().IsPlaying() && m_Agent.GetPhase() == AgentPhase::Done) {
+        m_Agent.Tick(ECS(), Renderer(), &m_Audio, m_Entities, m_Selected, &m_Particles);
+        if (m_Agent.Runtime().IsPlaying() && m_Agent.GetPhase() == AgentPhase::Done)
             m_Agent.Runtime().Update(dt);
-        }
+
+        m_Collect.Update(ECS(), &m_Particles, &m_Audio);
+        m_Particles.Update(dt);
 
         m_Audio.SetListener({ Renderer().GetCamera().Eye, {0,0,1}, {0,1,0} });
         m_Audio.Update(dt);
 
-        Vec3 wish{0, 0, 0};
+        Vec3 wish{};
 #ifdef MUK_PLATFORM_WINDOWS
         if (GetAsyncKeyState('W') & 0x8000) wish.z += 1;
         if (GetAsyncKeyState('S') & 0x8000) wish.z -= 1;
         if (GetAsyncKeyState('A') & 0x8000) wish.x -= 1;
         if (GetAsyncKeyState('D') & 0x8000) wish.x += 1;
-        if ((GetAsyncKeyState(VK_SPACE) & 0x8000) && m_PIE.IsPlaying())
-            m_Character.Jump(6.0f);
+        if ((GetAsyncKeyState(VK_SPACE) & 0x8000) && m_PIE.IsPlaying()) m_Character.Jump(6.0f);
 #endif
-        // Prefer script-driven Player when AI runtime is playing
         if (!m_Agent.Runtime().IsPlaying()) {
             m_Character.SetMoveInput(wish, 5.0f);
             m_Character.Update(Physics(), dt);
@@ -203,10 +180,10 @@ protected:
             ECS().ForEach<Transform, MeshRenderer>([&](Entity, Transform& t, MeshRenderer& mr) {
                 if (!mr.Visible) return;
                 Material mat = Material::CreateDefault();
-                if (mr.MaterialName == "CheckerMat") mat = m_CheckerMat;
-                else if (auto m = Assets().GetMaterial(mr.MaterialName)) mat = *m;
+                if (auto m = Assets().GetMaterial(mr.MaterialName)) mat = *m;
                 Renderer().DrawMesh(mr.MeshName, t.GetMatrix(), mat);
             });
+            m_Particles.Render(Renderer());
         };
 
         Renderer().BeginShadowPass({0, 0, 0}, 40.0f);
@@ -222,8 +199,7 @@ protected:
         m_UI.DrawViewport(Renderer(), Renderer().GetSceneRTGpuHandle(),
                           Renderer().GetSceneRTWidth(), Renderer().GetSceneRTHeight());
 
-        if (!m_PIE.IsPlaying())
-            DrawViewportGizmo();
+        if (!m_PIE.IsPlaying()) DrawViewportGizmo();
 
         m_UI.RenderDrawData();
         m_UI.EndFrame();
@@ -237,10 +213,7 @@ protected:
 
 private:
     void Track(Entity e, const std::string& name) {
-        EditorEntityInfo info;
-        info.Handle = e;
-        info.Name = name;
-        m_Entities.push_back(info);
+        m_Entities.push_back({ e, name, false });
         m_UI.Log("Created: " + name);
     }
 
@@ -249,24 +222,19 @@ private:
         ImGui::Begin("Toolbar");
         if (m_PIE.IsPlaying()) {
             if (ImGui::Button("Stop (F5)")) m_PIE.Stop(ECS(), &m_Character);
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.2f, 1, 0.3f, 1), "PLAYING");
+            ImGui::SameLine(); ImGui::TextColored(ImVec4(0.2f,1,0.3f,1), "PLAYING");
         } else {
             if (ImGui::Button("Play (F5)")) m_PIE.Play(ECS(), &m_Character);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Undo")) m_Undo.Undo(ECS());
-        ImGui::SameLine();
-        if (ImGui::Button("Redo")) m_Undo.Redo(ECS());
+        if (ImGui::Button("Screenshot (F12)")) {
+            Screenshot::CaptureSceneRT(Renderer(), "viewport");
+            m_Content.Rescan();
+        }
         ImGui::SameLine();
         if (ImGui::Button("Save Scene"))
             SceneSerializer::SaveWorld(ECS(), "Assets/Scenes/scene.json", &m_Entities);
-        ImGui::SameLine();
-        if (ImGui::Button("Load Scene")) {
-            m_Entities.clear();
-            SceneSerializer::LoadWorld(ECS(), "Assets/Scenes/scene.json", &m_Entities);
-        }
-        ImGui::Text("v0.8 multi-agent · Muk Script");
+        ImGui::Text("v0.10 async AI · orbs · particles");
         ImGui::End();
 #endif
     }
@@ -277,21 +245,13 @@ private:
         if (m_Selected.IsValid() && !m_PIE.IsPlaying()) {
             ImGui::Text("Entity %u", m_Selected.GetID());
             Reflection::DrawImGui(ECS(), m_Selected);
-            if (ImGui::RadioButton("Translate", m_Gizmo.GetOperation() == GizmoOp::Translate))
-                m_Gizmo.SetOperation(GizmoOp::Translate);
-            ImGui::SameLine();
-            if (ImGui::RadioButton("Rotate", m_Gizmo.GetOperation() == GizmoOp::Rotate))
-                m_Gizmo.SetOperation(GizmoOp::Rotate);
-            ImGui::SameLine();
-            if (ImGui::RadioButton("Scale", m_Gizmo.GetOperation() == GizmoOp::Scale))
-                m_Gizmo.SetOperation(GizmoOp::Scale);
         }
-        ImGui::Separator();
-        ImGui::Text("Script playing: %s", m_Agent.Runtime().IsPlaying() ? "yes" : "no");
-        ImGui::Text("Dual AI: %s", m_Agent.Team().HasDualProviders() ? "yes" : "no");
+        ImGui::Text("Particles: %d", m_Particles.AliveCount());
+        ImGui::Text("AI async: %s", m_Agent.Async().IsBusy() ? "busy" : "idle");
+        if (m_PlayerEntity.IsValid())
+            if (auto* c = ECS().GetComponent<CollectorComponent>(m_PlayerEntity))
+                ImGui::Text("Score: %d / %d", c->Score, c->TargetScore);
         ImGui::End();
-#else
-        m_UI.DrawDetails(ECS(), m_Selected);
 #endif
     }
 
@@ -304,9 +264,6 @@ private:
         ImVec2 pos = ImGui::GetWindowPos();
         ImVec2 min = ImGui::GetWindowContentRegionMin();
         ImVec2 size = ImGui::GetContentRegionAvail();
-        if (ImGui::IsKeyPressed(ImGuiKey_T)) m_Gizmo.SetOperation(GizmoOp::Translate);
-        if (ImGui::IsKeyPressed(ImGuiKey_R)) m_Gizmo.SetOperation(GizmoOp::Rotate);
-        if (ImGui::IsKeyPressed(ImGuiKey_Y)) m_Gizmo.SetOperation(GizmoOp::Scale);
         Transform before = *t;
         bool wasUsing = m_Gizmo.IsUsing();
         Mat4 view = Renderer().GetViewMatrix();
@@ -321,8 +278,7 @@ private:
     void DrawStats() {
 #ifdef MUK_USE_IMGUI
         ImGui::Begin("Stats");
-        auto& p = Profiler::Get();
-        ImGui::Text("FPS: %.1f", p.Fps());
+        ImGui::Text("FPS: %.1f", Profiler::Get().Fps());
         ImGui::Text("Agent: %s", m_Agent.GetStatus().c_str());
         ImGui::End();
 #endif
@@ -338,10 +294,11 @@ private:
     UndoStack m_Undo;
     PlayInEditor m_PIE;
     CharacterController m_Character;
+    CollectibleSystem m_Collect;
+    ParticleSystem m_Particles;
     std::vector<EditorEntityInfo> m_Entities;
     Entity m_Selected;
     Entity m_PlayerEntity;
-    Material m_CheckerMat;
 };
 
 int main() {
