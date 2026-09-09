@@ -4,13 +4,13 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <functional>
 #include <cmath>
 #include <algorithm>
 
 namespace Muk {
 
-/** 1. Damage / health */
 struct HealthComponent {
     float Max = 100.f;
     float Current = 100.f;
@@ -20,7 +20,6 @@ struct HealthComponent {
     bool IsDead() const { return Current <= 0.f; }
 };
 
-/** 2. Inventory */
 struct InventorySlot { std::string ItemId; int Count = 0; };
 class Inventory {
 public:
@@ -36,12 +35,11 @@ public:
         for (auto& s : m_Slots) if (s.ItemId == id) return s.Count;
         return 0;
     }
-    const std::vector<InventorySlot>& Slots() const { return m_Slots; }
+    const std::vector<InventorySlot>&Slots() const { return m_Slots; }
 private:
     std::vector<InventorySlot> m_Slots;
 };
 
-/** 3. Quest system */
 struct Quest {
     std::string Id, Title;
     int Progress = 0, Goal = 1;
@@ -59,7 +57,6 @@ private:
     std::unordered_map<std::string, Quest> m_Quests;
 };
 
-/** 4. Dialogue */
 struct DialogueLine { std::string Speaker, Text; std::vector<std::string> Choices; };
 class DialogueSystem {
 public:
@@ -69,8 +66,7 @@ public:
         return (m_Active && m_Index < (int)m_Lines.size()) ? &m_Lines[m_Index] : nullptr;
     }
     void Advance(int choice = 0) {
-        (void)choice;
-        ++m_Index;
+        (void)choice; ++m_Index;
         if (m_Index >= (int)m_Lines.size()) m_Active = false;
     }
 private:
@@ -79,7 +75,6 @@ private:
     bool m_Active = false;
 };
 
-/** 5. Save game slots */
 struct SaveSlot {
     int Index = 0;
     std::string Name;
@@ -94,7 +89,6 @@ private:
     SaveSlot m_Slots[3];
 };
 
-/** 6. Weather */
 struct WeatherSystem {
     enum class Type { Clear, Rain, Storm, Fog } Current = Type::Clear;
     float Intensity = 0.f;
@@ -105,7 +99,6 @@ struct WeatherSystem {
     }
 };
 
-/** 7. Day clock (hours) already in ProjectSettings — 8. Minimap data */
 struct MinimapMarker { Vec3 Pos; std::string Label; int Type = 0; };
 class Minimap {
 public:
@@ -116,7 +109,6 @@ private:
     std::vector<MinimapMarker> m_Markers;
 };
 
-/** 9. Achievement */
 class Achievements {
 public:
     void Unlock(const std::string& id) { m_Unlocked.insert(id); }
@@ -126,7 +118,6 @@ private:
     std::unordered_set<std::string> m_Unlocked;
 };
 
-/** 10. Combo / combat meter */
 struct ComboMeter {
     int Count = 0;
     float Timer = 0;
@@ -135,7 +126,6 @@ struct ComboMeter {
     void Update(float dt) { if (Timer > 0) { Timer -= dt; if (Timer <= 0) Count = 0; } }
 };
 
-/** 11. Vehicle-lite */
 struct VehicleState {
     Vec3 Position{};
     float Speed = 0;
@@ -147,11 +137,10 @@ struct VehicleState {
         float yaw = Steer * Speed * 0.05f;
         Position.x += std::sin(yaw) * Speed * dt;
         Position.z += std::cos(yaw) * Speed * dt;
-        Speed *= (1.f - 0.5f * dt); // friction
+        Speed *= (1.f - 0.5f * dt);
     }
 };
 
-/** 12. Building / grid place */
 class BuildGrid {
 public:
     void Configure(int w, int d) { m_W = w; m_D = d; m_Occ.assign(w * d, 0); }
@@ -167,16 +156,14 @@ private:
     std::vector<int> m_Occ;
 };
 
-/** 13. Economy */
 struct Wallet {
     int Coins = 0;
     void Earn(int n) { Coins += n; }
     bool Spend(int n) { if (Coins < n) return false; Coins -= n; return true; }
 };
 
-/** 14. Stealth meter */
 struct StealthState {
-    float Detection = 0; // 0 hidden .. 1 spotted
+    float Detection = 0;
     void Update(bool inLight, bool moving, float dt) {
         float target = (inLight ? 0.6f : 0.1f) + (moving ? 0.3f : 0.f);
         Detection = std::clamp(Detection + (target - Detection) * dt * 2.f, 0.f, 1.f);
@@ -184,7 +171,6 @@ struct StealthState {
     bool Spotted() const { return Detection > 0.85f; }
 };
 
-/** 15. Wave spawner */
 class WaveSpawner {
 public:
     void Configure(int waves, int perWave) { m_Waves = waves; m_Per = perWave; m_Current = 0; }
