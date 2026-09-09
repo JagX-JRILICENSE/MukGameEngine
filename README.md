@@ -1,34 +1,30 @@
-# Muk Game Engine v0.13
+# Muk Game Engine v0.14
 
 https://github.com/JagX-JRILICENSE/MukGameEngine
 
-Open DX12 C++ engine with an **AI-native editor**. Not a claim that every Unreal/Unity subsystem is matched — it is a fast, modern stack plus capabilities those tools do not ship by default (multi-provider AI game builder, async agents, undoable AI spawns).
+## Honest positioning
 
-## Why Muk is competitive
+Muk is **not** Unreal Engine. Unreal has decades of production tooling, AAA rendering, Marketplace, and ecosystem scale we do not claim to match overnight.
 
-| Area | Muk advantage |
-|------|----------------|
-| AI | Multi-agent OpenRouter + NVIDIA build/playtest/fix loop in-editor |
-| Weight | Single static lib + editor exe; no multi-GB launcher |
-| Scripting | Muk Script + visual graph data model + hot reload (F9) |
-| Iteration | AI spawn undo, async AI, package.manifest, analytics |
-| Rendering | Cascades, IBL cubemap, bloom, SSAO/DOF/grade settings, frustum+LOD |
-| World | Navmesh, partition streaming, foliage+wind, water, terrain heightfield |
-| Cinema | Timeline camera sequencer |
-| Input | XInput gamepad + rebind map |
-| Net | Local-authority multiplayer scaffold |
+What Muk *does* ship that is rare or stronger for small teams:
 
-## v0.13 systems (~40 upgrades)
+- **AI-native game builder** (multi-provider, async, undoable spawns, script gen, playtest loop)
+- **Full source, tiny footprint**, one DX12 editor exe
+- **Modern core**: cascades, GPU skin PSO, fullscreen SSAO+bloom, nav, partition, net
 
-**Rendering:** frustum cull, LOD tiers, SSAO/DOF/motion blur/color grade stack, selection multi-tint, water plane, wind-animated foliage  
-**Animation:** state machine, two-bone IK, GPU SkinCB + Skin.hlsl  
-**World:** navmesh bake, world partition, heightfield terrain, vegetation scatter  
-**Editor:** Feature Hub panel, multi-select, cinematic timeline, package manifest  
-**Input/Net:** gamepad, rebind, local net host/bots  
-**Ops:** crash log, analytics events, visual script graph  
-**ECS:** Tag/Layer/Billboard/LOD radius components  
+## v0.14 headline systems
 
-Open **Feature Hub v0.13** in the editor for live controls.
+| Requested | Status |
+|-----------|--------|
+| Full GPU skin PSO | `DX12SkinPSO` — bone CB + skinned cube draw path |
+| Real SSAO + bloom fullscreen | `DX12PostFX` fullscreen triangle pass |
+| Node-graph canvas UI | ImGui **Node Graph** panel (drag nodes, links) |
+| UDP multiplayer | `UdpNet` host/connect, transform packets |
+| Mature animation tooling | Montages, notifies, layers, 1D blend tree |
+| Ecosystem size | `PluginRegistry` + 10 builtin modules + samples |
+
+### +15 gameplay systems
+Health, Inventory, Quests, Dialogue, Save slots, Weather, Minimap, Achievements, Combo, Vehicle, Build grid, Wallet, Stealth, Wave spawner (+ existing triggers/collectibles)
 
 ### Build
 ```powershell
