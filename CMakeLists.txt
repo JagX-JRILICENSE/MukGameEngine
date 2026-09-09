@@ -1,7 +1,6 @@
-cmake_minimum_required(VERSION 3.25)
-project(MukGameEngine VERSION 0.9.0 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.20)
+project(MukGameEngine VERSION 0.14.0 LANGUAGES CXX)
 
-# CMake 3.30+ errors on FetchContent_Populate unless policy set
 if(POLICY CMP0169)
     cmake_policy(SET CMP0169 OLD)
 endif()
@@ -30,6 +29,8 @@ option(MUK_USE_TINYGLTF "Fetch and enable tinygltf for glTF loading" OFF)
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
+# Avoid interactive git prompts in CI
+set(FETCHCONTENT_UPDATES_DISCONNECTED OFF)
 
 if(WIN32)
     add_compile_definitions(MUK_PLATFORM_WINDOWS)
@@ -61,8 +62,6 @@ if(MUK_USE_IMGUI)
 
     add_compile_definitions(MUK_USE_IMGUI)
     message(STATUS "ImGui (docking) + ImGuizmo: enabled")
-    message(STATUS "  imgui: ${imgui_SOURCE_DIR}")
-    message(STATUS "  imguizmo: ${imguizmo_SOURCE_DIR}")
 endif()
 
 if(MUK_USE_JOLT)
@@ -79,7 +78,6 @@ if(MUK_USE_JOLT)
     set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(JoltPhysics)
     add_compile_definitions(MUK_USE_JOLT)
-    message(STATUS "Jolt Physics: enabled")
 endif()
 
 if(MUK_USE_TINYGLTF)
@@ -93,7 +91,6 @@ if(MUK_USE_TINYGLTF)
         FetchContent_Populate(tinygltf)
     endif()
     add_compile_definitions(MUK_USE_TINYGLTF)
-    message(STATUS "tinygltf: enabled (${tinygltf_SOURCE_DIR})")
 endif()
 
 include_directories(${CMAKE_SOURCE_DIR}/Engine)
