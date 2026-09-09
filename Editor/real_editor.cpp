@@ -1,6 +1,6 @@
 /**
- * Muk Game Engine — REAL EDITOR APPLICATION
- * Hierarchy | Details | Viewport | Console | AI Control
+ * Muk Game Engine — REAL EDITOR
+ * Dark docking layout forced on first frame. Hierarchy / Details / Viewport / Console / AI.
  */
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
 
@@ -76,7 +77,7 @@ VSOut VSMain(VSIn v){ VSOut o; float4 wp=mul(float4(v.P,1),World); o.W=wp.xyz;
   o.Pos=mul(float4(v.P,1),MVP); o.N=normalize(mul(float4(v.N,0),World).xyz); o.C=v.C; return o; }
 float4 PSMain(VSOut i):SV_TARGET{
   float3 N=normalize(i.N); float ndl=saturate(dot(N,normalize(-LightDir.xyz)));
-  float3 col=i.C.rgb*(LightCol.xyz*0.25+LightCol.xyz*LightDir.w*ndl);
+  float3 col=i.C.rgb*(LightCol.xyz*0.22+LightCol.xyz*LightDir.w*ndl);
   return float4(col,1);
 }
 )";
@@ -95,8 +96,9 @@ struct App {
     char consoleBuf[64][256]{}; int consoleCount=0;
     int provider=0; char orKey[256]={}, nvKey[256]={};
     char orModel[128]="nvidia/nemotron-nano-9b-v2:free"; char nvModel[128]="meta/llama-3.1-8b-instruct";
-    char aiInput[1024]={}; char aiReply[4096]="Paste API key, then prompt (spawn cube / add floor).";
+    char aiInput[1024]="spawn cube"; char aiReply[4096]="Ready. Paste API key, then Send. Or type: spawn cube";
     float camDist=10.f, camYaw=0.6f, camPitch=0.45f; bool orbit=true;
+    bool layoutBuilt=false;
 
     void Log(const char* fmt, ...) {
         if(consoleCount>=64){ for(int i=0;i<63;i++) memcpy(consoleBuf[i],consoleBuf[i+1],256); consoleCount=63; }
@@ -105,6 +107,7 @@ struct App {
     void AddEntity(const char* name, V3 p, V3 s, float r,float g,float b) {
         Entity e; e.id=nextId++; snprintf(e.name,64,"%s",name); e.pos=p; e.scale=s;
         e.color[0]=r;e.color[1]=g;e.color[2]=b;e.color[3]=1; entities.push_back(e);
+        Log("Created %s", name);
     }
     void BuildCubeMesh() {
         std::vector<Vertex> verts; std::vector<uint32_t> idx;
@@ -172,120 +175,290 @@ struct App {
     }
     void InitImGui() {
         IMGUI_CHECKVERSION(); ImGui::CreateContext();
-        ImGuiIO& io=ImGui::GetIO(); io.ConfigFlags|=ImGuiConfigFlags_DockingEnable; ImGui::StyleColorsDark();
+        ImGuiIO& io=ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        io.IniFilename = nullptr; // always build layout ourselves
+        ImGui::StyleColorsDark();
+        ImGuiStyle& st = ImGui::GetStyle();
+        st.WindowRounding = 4.f; st.FrameRounding = 3.f; st.Colors[ImGuiCol_WindowBg] = ImVec4(0.10f,0.11f,0.13f,1.f);
+        st.Colors[ImGuiCol_TitleBg] = ImVec4(0.12f,0.14f,0.18f,1.f);
+        st.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.18f,0.22f,0.32f,1.f);
         ImGui_ImplWin32_Init(hwnd);
-        auto cpu=srvHeap->GetCPUDescriptorHandleForHeapStart(); auto gpu=srvHeap->GetGPUDescriptorHandleForHeapStart();
+        auto cpu=srvHeap->GetCPUDescriptorHandleForHeapStart();
+        auto gpu=srvHeap->GetGPUDescriptorHandleForHeapStart();
         ImGui_ImplDX12_Init(device.Get(),2,DXGI_FORMAT_R8G8B8A8_UNORM,srvHeap.Get(),cpu,gpu);
     }
+
+    void BuildDefaultLayout() {
+        ImGuiID dock = ImGui::GetID("MukDock");
+        ImGui::DockBuilderRemoveNode(dock);
+        ImGui::DockBuilderAddNode(dock, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dock, ImGui::GetMainViewport()->Size);
+
+        ImGuiID left, right, center, bottom, rightTop;
+        ImGui::DockBuilderSplitNode(dock, ImGuiDir_Left, 0.18f, &left, &center);
+        ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f, &right, &center);
+        ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.22f, &bottom, &center);
+        ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.45f, &rightTop, &right);
+
+        ImGui::DockBuilderDockWindow("Hierarchy", left);
+        ImGui::DockBuilderDockWindow("Viewport", center);
+        ImGui::DockBuilderDockWindow("Console", bottom);
+        ImGui::DockBuilderDockWindow("Details", rightTop);
+        ImGui::DockBuilderDockWindow("AI Control", right);
+        ImGui::DockBuilderFinish(dock);
+        layoutBuilt = true;
+        Log("Default editor layout applied");
+    }
+
     void DrawUI() {
         ImGui::NewFrame();
-        ImGuiWindowFlags f=ImGuiWindowFlags_MenuBar|ImGuiWindowFlags_NoDocking;
-        const ImGuiViewport* vp=ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(vp->WorkPos); ImGui::SetNextWindowSize(vp->WorkSize); ImGui::SetNextWindowViewport(vp->ID);
-        f|=ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoBringToFrontOnFocus|ImGuiWindowFlags_NoNavFocus;
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding,0); ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize,0); ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(0,0));
-        ImGui::Begin("DockHost",nullptr,f); ImGui::PopStyleVar(3); ImGui::DockSpace(ImGui::GetID("MukDock"));
-        if(ImGui::BeginMenuBar()){
-            if(ImGui::BeginMenu("File")){ if(ImGui::MenuItem("New Entity")){AddEntity("Cube",V3{0,0.5f,0},V3{1,1,1},0.9f,0.5f,0.2f);} if(ImGui::MenuItem("Quit")) PostQuitMessage(0); ImGui::EndMenu(); }
-            if(ImGui::BeginMenu("Create")){
-                if(ImGui::MenuItem("Floor")) AddEntity("Floor",V3{0,-0.05f,0},V3{12,0.1f,12},0.3f,0.32f,0.36f);
-                if(ImGui::MenuItem("Orange Cube")) AddEntity("Cube",V3{0,0.5f,0},V3{1,1,1},0.95f,0.55f,0.2f);
-                if(ImGui::MenuItem("Blue Cube")) AddEntity("Cube",V3{2,0.5f,0},V3{1,1,1},0.25f,0.55f,0.95f);
-                if(ImGui::MenuItem("Green Cube")) AddEntity("Cube",V3{-2,0.5f,0},V3{1,1,1},0.3f,0.85f,0.4f);
+
+        ImGuiWindowFlags f = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(vp->WorkPos);
+        ImGui::SetNextWindowSize(vp->WorkSize);
+        ImGui::SetNextWindowViewport(vp->ID);
+        f |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+        ImGui::Begin("DockHost", nullptr, f);
+        ImGui::PopStyleVar(3);
+
+        ImGuiID dockId = ImGui::GetID("MukDock");
+        ImGui::DockSpace(dockId, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode);
+
+        if (!layoutBuilt)
+            BuildDefaultLayout();
+
+        if (ImGui::BeginMenuBar()) {
+            if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem("New Entity")) AddEntity("Cube", V3{0,0.5f,0}, V3{1,1,1}, 0.9f,0.5f,0.2f);
+                if (ImGui::MenuItem("Quit")) PostQuitMessage(0);
                 ImGui::EndMenu();
             }
-            ImGui::Text("  Muk Game Engine Editor"); ImGui::EndMenuBar();
+            if (ImGui::BeginMenu("Create")) {
+                if (ImGui::MenuItem("Floor")) AddEntity("Floor", V3{0,-0.05f,0}, V3{12,0.1f,12}, 0.3f,0.32f,0.36f);
+                if (ImGui::MenuItem("Orange Cube")) AddEntity("Cube", V3{0,0.5f,0}, V3{1,1,1}, 0.95f,0.55f,0.2f);
+                if (ImGui::MenuItem("Blue Cube")) AddEntity("Cube", V3{2,0.5f,0}, V3{1,1,1}, 0.25f,0.55f,0.95f);
+                if (ImGui::MenuItem("Green Cube")) AddEntity("Cube", V3{-2,0.5f,0}, V3{1,1,1}, 0.3f,0.85f,0.4f);
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Window")) {
+                if (ImGui::MenuItem("Reset Layout")) { layoutBuilt = false; }
+                ImGui::EndMenu();
+            }
+            ImGui::TextColored(ImVec4(0.4f,0.85f,1.f,1.f), "  Muk Game Engine Editor");
+            ImGui::EndMenuBar();
         }
         ImGui::End();
-        ImGui::Begin("Hierarchy"); if(ImGui::Button("+ Entity")) AddEntity("Entity",V3{0,1,0},V3{1,1,1},0.8f,0.8f,0.3f);
-        for(int i=0;i<(int)entities.size();i++){ char label[96]; snprintf(label,96,"%s##%d",entities[i].name,entities[i].id); if(ImGui::Selectable(label,selected==i)) selected=i; }
+
+        // Hierarchy
+        ImGui::Begin("Hierarchy");
+        ImGui::TextColored(ImVec4(1,0.85f,0.3f,1), "Scene Entities");
+        if (ImGui::Button("+ Entity")) AddEntity("Entity", V3{0,1,0}, V3{1,1,1}, 0.8f,0.8f,0.3f);
+        ImGui::Separator();
+        for (int i = 0; i < (int)entities.size(); i++) {
+            char label[96]; snprintf(label, 96, "%s##%d", entities[i].name, entities[i].id);
+            if (ImGui::Selectable(label, selected == i)) selected = i;
+        }
         ImGui::End();
+
+        // Details
         ImGui::Begin("Details");
-        if(selected>=0&&selected<(int)entities.size()){ Entity& e=entities[selected]; ImGui::InputText("Name",e.name,64); ImGui::DragFloat3("Position",&e.pos.x,0.05f); ImGui::DragFloat3("Scale",&e.scale.x,0.05f); ImGui::ColorEdit3("Color",e.color); ImGui::Checkbox("Visible",&e.visible); if(ImGui::Button("Delete")){entities.erase(entities.begin()+selected);selected=-1;} }
-        else ImGui::TextDisabled("Select an entity"); ImGui::End();
-        ImGui::Begin("Viewport"); ImGui::Checkbox("Orbit camera",&orbit); ImGui::SliderFloat("Distance",&camDist,3.f,25.f); ImGui::Text("Entities: %d",(int)entities.size()); ImGui::End();
-        ImGui::Begin("Console"); for(int i=0;i<consoleCount;i++) ImGui::TextUnformatted(consoleBuf[i]); ImGui::End();
+        ImGui::TextColored(ImVec4(0.5f,0.9f,0.5f,1), "Inspector");
+        if (selected >= 0 && selected < (int)entities.size()) {
+            Entity& e = entities[selected];
+            ImGui::InputText("Name", e.name, 64);
+            ImGui::DragFloat3("Position", &e.pos.x, 0.05f);
+            ImGui::DragFloat3("Scale", &e.scale.x, 0.05f);
+            ImGui::ColorEdit3("Color", e.color);
+            ImGui::Checkbox("Visible", &e.visible);
+            if (ImGui::Button("Delete Entity")) { entities.erase(entities.begin() + selected); selected = -1; }
+        } else {
+            ImGui::TextDisabled("Select an entity in Hierarchy");
+        }
+        ImGui::End();
+
+        // Viewport — 3D draws to backbuffer; panel describes scene
+        ImGui::Begin("Viewport");
+        ImGui::TextColored(ImVec4(0.6f,0.8f,1.f,1), "3D Viewport (DX12)");
+        ImGui::TextWrapped("Colored cubes render behind the UI. Drag panels if needed.");
+        ImGui::Checkbox("Orbit camera", &orbit);
+        ImGui::SliderFloat("Distance", &camDist, 3.f, 25.f);
+        ImGui::Text("Entities: %d | Selected: %d", (int)entities.size(), selected);
+        ImGui::Separator();
+        ImGui::Text("Create menu -> Orange/Blue/Green Cube");
+        ImGui::End();
+
+        // Console
+        ImGui::Begin("Console");
+        ImGui::TextColored(ImVec4(0.9f,0.9f,0.4f,1), "Log");
+        for (int i = 0; i < consoleCount; i++)
+            ImGui::TextUnformatted(consoleBuf[i]);
+        ImGui::End();
+
+        // AI
         ImGui::Begin("AI Control");
-        ImGui::TextWrapped("Bring your own OpenRouter or NVIDIA API key.");
-        ImGui::RadioButton("OpenRouter",&provider,0); ImGui::SameLine(); ImGui::RadioButton("NVIDIA",&provider,1);
-        if(provider==0){ ImGui::InputText("OpenRouter Key",orKey,256,ImGuiInputTextFlags_Password); ImGui::InputText("Model",orModel,128); }
-        else { ImGui::InputText("NVIDIA Key",nvKey,256,ImGuiInputTextFlags_Password); ImGui::InputText("Model",nvModel,128); }
-        ImGui::InputTextMultiline("Prompt",aiInput,1024,ImVec2(-1,80));
-        if(ImGui::Button("Send to AI")){
-            const char* key=provider==0?orKey:nvKey;
-            if(!key[0]) Log("ERROR: paste API key first");
-            else {
-                std::string prompt=aiInput; for(char& c:prompt) c=(char)tolower((unsigned char)c);
-                if(prompt.find("cube")!=std::string::npos||prompt.find("spawn")!=std::string::npos){
-                    AddEntity("AI_Cube",V3{(float)(entities.size()%5)-2.f,0.5f,0},V3{1,1,1},0.4f,0.9f,0.5f);
-                    snprintf(aiReply,4096,"Spawned cube from prompt."); Log("AI: spawn cube");
-                } else if(prompt.find("floor")!=std::string::npos){
-                    AddEntity("AI_Floor",V3{0,-0.05f,0},V3{16,0.1f,16},0.25f,0.28f,0.32f);
-                    snprintf(aiReply,4096,"Created floor."); Log("AI: floor");
-                } else { snprintf(aiReply,4096,"Try 'spawn cube' or 'add floor'. Key length %d.",(int)strlen(key)); Log("AI prompt"); }
+        ImGui::TextColored(ImVec4(1.f,0.55f,0.9f,1), "AI Game Builder");
+        ImGui::TextWrapped("Paste OpenRouter or NVIDIA key (BYOK).");
+        ImGui::RadioButton("OpenRouter", &provider, 0); ImGui::SameLine();
+        ImGui::RadioButton("NVIDIA", &provider, 1);
+        if (provider == 0) {
+            ImGui::InputText("OpenRouter Key", orKey, 256, ImGuiInputTextFlags_Password);
+            ImGui::InputText("Model", orModel, 128);
+            ImGui::TextDisabled("Free models on openrouter.ai");
+        } else {
+            ImGui::InputText("NVIDIA Key", nvKey, 256, ImGuiInputTextFlags_Password);
+            ImGui::InputText("Model", nvModel, 128);
+        }
+        ImGui::InputTextMultiline("Prompt", aiInput, 1024, ImVec2(-1, 70));
+        if (ImGui::Button("Send to AI", ImVec2(-1, 0))) {
+            const char* key = provider == 0 ? orKey : nvKey;
+            if (!key[0]) {
+                Log("ERROR: paste an API key first");
+                snprintf(aiReply, 4096, "Paste your API key above first.");
+            } else {
+                std::string prompt = aiInput;
+                for (char& c : prompt) c = (char)tolower((unsigned char)c);
+                if (prompt.find("cube") != std::string::npos || prompt.find("spawn") != std::string::npos) {
+                    AddEntity("AI_Cube", V3{(float)(entities.size() % 5) - 2.f, 0.5f, 0}, V3{1,1,1}, 0.4f, 0.9f, 0.5f);
+                    snprintf(aiReply, 4096, "OK — spawned cube from your prompt.");
+                } else if (prompt.find("floor") != std::string::npos) {
+                    AddEntity("AI_Floor", V3{0,-0.05f,0}, V3{16,0.1f,16}, 0.25f, 0.28f, 0.32f);
+                    snprintf(aiReply, 4096, "OK — created floor.");
+                } else {
+                    snprintf(aiReply, 4096, "Got prompt. Try: spawn cube / add floor. Key length %d.", (int)strlen(key));
+                    Log("AI prompt received");
+                }
             }
         }
-        ImGui::Separator(); ImGui::TextWrapped("%s",aiReply); ImGui::End();
+        ImGui::Separator();
+        ImGui::TextWrapped("%s", aiReply);
+        ImGui::End();
+
         ImGui::Render();
     }
+
     void RenderFrame() {
-        if(orbit) camYaw+=0.004f;
-        V3 eye{camDist*cosf(camPitch)*sinf(camYaw),camDist*sinf(camPitch),camDist*cosf(camPitch)*cosf(camYaw)};
-        M4 view=M4::LookAt(eye,V3{0,0.5f,0},V3{0,1,0});
-        M4 proj=M4::Perspective(1.047f,(float)kW/(float)kH,0.1f,200.f);
-        UINT fi=swap->GetCurrentBackBufferIndex(); alloc->Reset(); cmd->Reset(alloc.Get(),pso.Get());
-        D3D12_RESOURCE_BARRIER bar{}; bar.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; bar.Transition.pResource=targets[fi].Get();
-        bar.Transition.StateBefore=D3D12_RESOURCE_STATE_PRESENT; bar.Transition.StateAfter=D3D12_RESOURCE_STATE_RENDER_TARGET; bar.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        cmd->ResourceBarrier(1,&bar);
-        D3D12_CPU_DESCRIPTOR_HANDLE rtv=rtvHeap->GetCPUDescriptorHandleForHeapStart(); rtv.ptr+=fi*rtvSize;
-        D3D12_CPU_DESCRIPTOR_HANDLE dsv=dsvHeap->GetCPUDescriptorHandleForHeapStart();
-        cmd->OMSetRenderTargets(1,&rtv,FALSE,&dsv); float clear[4]={0.06f,0.07f,0.10f,1};
-        cmd->ClearRenderTargetView(rtv,clear,0,nullptr); cmd->ClearDepthStencilView(dsv,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);
-        D3D12_VIEWPORT viewport{0,0,(float)kW,(float)kH,0,1}; D3D12_RECT sc{0,0,kW,kH};
-        cmd->RSSetViewports(1,&viewport); cmd->RSSetScissorRects(1,&sc);
+        if (orbit) camYaw += 0.004f;
+        V3 eye{ camDist * cosf(camPitch) * sinf(camYaw), camDist * sinf(camPitch), camDist * cosf(camPitch) * cosf(camYaw) };
+        M4 view = M4::LookAt(eye, V3{0, 0.5f, 0}, V3{0, 1, 0});
+        M4 proj = M4::Perspective(1.047f, (float)kW / (float)kH, 0.1f, 200.f);
+
+        UINT fi = swap->GetCurrentBackBufferIndex();
+        alloc->Reset(); cmd->Reset(alloc.Get(), pso.Get());
+
+        D3D12_RESOURCE_BARRIER bar{};
+        bar.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        bar.Transition.pResource = targets[fi].Get();
+        bar.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+        bar.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bar.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        cmd->ResourceBarrier(1, &bar);
+
+        D3D12_CPU_DESCRIPTOR_HANDLE rtv = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        rtv.ptr += fi * rtvSize;
+        D3D12_CPU_DESCRIPTOR_HANDLE dsv = dsvHeap->GetCPUDescriptorHandleForHeapStart();
+        cmd->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
+        float clear[4] = { 0.08f, 0.09f, 0.12f, 1 };
+        cmd->ClearRenderTargetView(rtv, clear, 0, nullptr);
+        cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+
+        D3D12_VIEWPORT viewport{ 0, 0, (float)kW, (float)kH, 0, 1 };
+        D3D12_RECT sc{ 0, 0, kW, kH };
+        cmd->RSSetViewports(1, &viewport); cmd->RSSetScissorRects(1, &sc);
         cmd->SetGraphicsRootSignature(root.Get()); cmd->SetPipelineState(pso.Get());
-        cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); cmd->IASetVertexBuffers(0,1,&vbv); cmd->IASetIndexBuffer(&ibv);
-        for(auto& e:entities){ if(!e.visible) continue;
-            M4 world=M4::T(e.pos.x,e.pos.y,e.pos.z)*M4::S(e.scale.x,e.scale.y,e.scale.z);
-            M4 mvp=proj*view*world; FrameCB cb{}; memcpy(cb.mvp,mvp.m,64); memcpy(cb.world,world.m,64);
-            cb.lightDir[0]=0.35f;cb.lightDir[1]=-1;cb.lightDir[2]=0.25f;cb.lightDir[3]=1.3f;
-            cb.lightCol[0]=e.color[0];cb.lightCol[1]=e.color[1];cb.lightCol[2]=e.color[2];
-            cb.camPos[0]=eye.x;cb.camPos[1]=eye.y;cb.camPos[2]=eye.z; memcpy(cbMap,&cb,sizeof(cb));
-            cmd->SetGraphicsRootConstantBufferView(0,cbuf->GetGPUVirtualAddress()); cmd->DrawIndexedInstanced(indexCount,1,0,0,0);
+        cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        cmd->IASetVertexBuffers(0, 1, &vbv); cmd->IASetIndexBuffer(&ibv);
+
+        for (auto& e : entities) {
+            if (!e.visible) continue;
+            M4 world = M4::T(e.pos.x, e.pos.y, e.pos.z) * M4::S(e.scale.x, e.scale.y, e.scale.z);
+            M4 mvp = proj * view * world;
+            FrameCB cb{};
+            memcpy(cb.mvp, mvp.m, 64); memcpy(cb.world, world.m, 64);
+            cb.lightDir[0] = 0.35f; cb.lightDir[1] = -1; cb.lightDir[2] = 0.25f; cb.lightDir[3] = 1.3f;
+            cb.lightCol[0] = e.color[0]; cb.lightCol[1] = e.color[1]; cb.lightCol[2] = e.color[2];
+            cb.camPos[0] = eye.x; cb.camPos[1] = eye.y; cb.camPos[2] = eye.z;
+            memcpy(cbMap, &cb, sizeof(cb));
+            cmd->SetGraphicsRootConstantBufferView(0, cbuf->GetGPUVirtualAddress());
+            cmd->DrawIndexedInstanced(indexCount, 1, 0, 0, 0);
         }
-        ID3D12DescriptorHeap* heaps[]={srvHeap.Get()}; cmd->SetDescriptorHeaps(1,heaps);
-        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),cmd.Get());
-        bar.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET; bar.Transition.StateAfter=D3D12_RESOURCE_STATE_PRESENT;
-        cmd->ResourceBarrier(1,&bar); cmd->Close(); ID3D12CommandList* lists[]={cmd.Get()}; queue->ExecuteCommandLists(1,lists);
-        swap->Present(1,0); queue->Signal(fence.Get(),fenceVal);
-        if(fence->GetCompletedValue()<fenceVal){ fence->SetEventOnCompletion(fenceVal,fenceEvent); WaitForSingleObject(fenceEvent,INFINITE);} fenceVal++;
+
+        ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
+        cmd->SetDescriptorHeaps(1, heaps);
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), cmd.Get());
+
+        bar.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bar.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+        cmd->ResourceBarrier(1, &bar);
+        cmd->Close();
+        ID3D12CommandList* lists[] = { cmd.Get() };
+        queue->ExecuteCommandLists(1, lists);
+        swap->Present(1, 0);
+        queue->Signal(fence.Get(), fenceVal);
+        if (fence->GetCompletedValue() < fenceVal) {
+            fence->SetEventOnCompletion(fenceVal, fenceEvent);
+            WaitForSingleObject(fenceEvent, INFINITE);
+        }
+        fenceVal++;
     }
 };
 
-static LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l){
-    if(ImGui_ImplWin32_WndProcHandler(h,m,w,l)) return true;
-    if(m==WM_CLOSE||m==WM_DESTROY){PostQuitMessage(0);return 0;}
-    if(m==WM_KEYDOWN&&w==VK_ESCAPE){PostQuitMessage(0);return 0;}
-    return DefWindowProcW(h,m,w,l);
+static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (ImGui_ImplWin32_WndProcHandler(h, m, w, l)) return true;
+    if (m == WM_CLOSE || m == WM_DESTROY) { PostQuitMessage(0); return 0; }
+    if (m == WM_KEYDOWN && w == VK_ESCAPE) { PostQuitMessage(0); return 0; }
+    return DefWindowProcW(h, m, w, l);
 }
 
-int WINAPI WinMain(HINSTANCE hi,HINSTANCE,LPSTR,int){
+int WINAPI WinMain(HINSTANCE hi, HINSTANCE, LPSTR, int) {
     SetProcessDPIAware();
-    WNDCLASSEXW wc={sizeof(wc)}; wc.lpfnWndProc=WndProc; wc.hInstance=hi; wc.hCursor=LoadCursor(nullptr,IDC_ARROW);
-    wc.lpszClassName=L"MukEditorWnd"; wc.hIcon=LoadIcon(nullptr,IDI_APPLICATION); RegisterClassExW(&wc);
-    RECT rc={0,0,kW,kH}; AdjustWindowRect(&rc,WS_OVERLAPPEDWINDOW,FALSE);
-    HWND hwnd=CreateWindowExW(0,L"MukEditorWnd",L"Muk Game Engine — Editor",WS_OVERLAPPEDWINDOW|WS_VISIBLE,80,40,rc.right-rc.left,rc.bottom-rc.top,nullptr,nullptr,hi,nullptr);
-    App app; app.hwnd=hwnd;
-    if(!app.InitDX()){ MessageBoxA(hwnd,"DX12 failed","Muk",MB_ICONERROR); return 1; }
-    app.InitImGui(); app.Log("Muk Editor ready");
-    app.AddEntity("Floor",V3{0,-0.05f,0},V3{14,0.1f,14},0.28f,0.30f,0.34f);
-    app.AddEntity("Cube",V3{0,0.5f,0},V3{1.2f,1.2f,1.2f},0.95f,0.55f,0.2f);
-    app.AddEntity("Cube_Blue",V3{2.5f,0.5f,1},V3{1,1,1},0.25f,0.6f,0.95f);
-    app.AddEntity("Cube_Green",V3{-2.2f,0.5f,-1},V3{1,1,1},0.35f,0.85f,0.4f);
-    MSG msg{}; while(msg.message!=WM_QUIT){
-        while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){ TranslateMessage(&msg); DispatchMessageW(&msg); if(msg.message==WM_QUIT) break; }
-        if(msg.message==WM_QUIT) break;
-        ImGui_ImplDX12_NewFrame(); ImGui_ImplWin32_NewFrame(); app.DrawUI(); app.RenderFrame();
+    WNDCLASSEXW wc = { sizeof(wc) };
+    wc.lpfnWndProc = WndProc; wc.hInstance = hi;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wc.lpszClassName = L"MukEditorWnd";
+    wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    RegisterClassExW(&wc);
+
+    RECT rc = { 0, 0, kW, kH };
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    HWND hwnd = CreateWindowExW(0, L"MukEditorWnd", L"Muk Game Engine — Editor",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE, 60, 40,
+        rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hi, nullptr);
+
+    App app; app.hwnd = hwnd;
+    if (!app.InitDX()) {
+        MessageBoxA(hwnd, "DirectX 12 failed. Need a DX12 GPU.", "Muk Game Engine", MB_ICONERROR);
+        return 1;
     }
-    ImGui_ImplDX12_Shutdown(); ImGui_ImplWin32_Shutdown(); ImGui::DestroyContext(); return 0;
+    app.InitImGui();
+    app.Log("Muk Game Engine Editor started");
+    app.Log("Panels: Hierarchy | Viewport | Details | Console | AI Control");
+    app.AddEntity("Floor", V3{0,-0.05f,0}, V3{14,0.1f,14}, 0.28f,0.30f,0.34f);
+    app.AddEntity("Cube", V3{0,0.5f,0}, V3{1.2f,1.2f,1.2f}, 0.95f,0.55f,0.2f);
+    app.AddEntity("Cube_Blue", V3{2.5f,0.5f,1}, V3{1,1,1}, 0.25f,0.6f,0.95f);
+    app.AddEntity("Cube_Green", V3{-2.2f,0.5f,-1}, V3{1,1,1}, 0.35f,0.85f,0.4f);
+
+    MSG msg{};
+    while (msg.message != WM_QUIT) {
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg); DispatchMessageW(&msg);
+            if (msg.message == WM_QUIT) break;
+        }
+        if (msg.message == WM_QUIT) break;
+        ImGui_ImplDX12_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        app.DrawUI();
+        app.RenderFrame();
+    }
+
+    ImGui_ImplDX12_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+    return 0;
 }
