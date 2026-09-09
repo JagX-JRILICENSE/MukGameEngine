@@ -40,6 +40,8 @@ set(ENGINE_SOURCES
     Audio/AudioSystem.cpp
     Reflection/Reflection.cpp
     Script/GameplayScript.cpp
+    Gameplay/Collectible.cpp
+    Particles/ParticleSystem.cpp
 )
 
 set(ENGINE_HEADERS
@@ -90,6 +92,8 @@ set(ENGINE_HEADERS
     Audio/AudioSystem.h
     Reflection/Reflection.h
     Script/GameplayScript.h
+    Gameplay/Collectible.h
+    Particles/ParticleSystem.h
     Engine.h
 )
 
