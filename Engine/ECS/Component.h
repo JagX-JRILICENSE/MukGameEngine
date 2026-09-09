@@ -14,11 +14,10 @@ struct IComponent {
 
 struct Transform : public IComponent {
     Vec3 Position{0.0f, 0.0f, 0.0f};
-    Vec3 Rotation{0.0f, 0.0f, 0.0f}; // Euler degrees XYZ
+    Vec3 Rotation{0.0f, 0.0f, 0.0f};
     Vec3 Scale{1.0f, 1.0f, 1.0f};
 
     Mat4 GetMatrix() const {
-        // T * Rz * Ry * Rx * S (degrees)
         const f32 deg2rad = 0.01745329251f;
         f32 rx = Rotation.x * deg2rad;
         f32 ry = Rotation.y * deg2rad;
@@ -46,6 +45,8 @@ struct MeshRenderer : public IComponent {
     std::string MeshName = "Cube";
     std::string MaterialName = "Default";
     bool Visible = true;
+    int LODBias = 0;
+    float BoundingRadius = 1.0f;
 };
 
 struct Camera : public IComponent {
@@ -56,7 +57,7 @@ struct Camera : public IComponent {
 };
 
 struct DirectionalLight : public IComponent {
-    Vec3 Direction{0.3f, -1.0f, 0.2f}; // will be normalized in renderer
+    Vec3 Direction{0.3f, -1.0f, 0.2f};
     Vec3 Color{1.0f, 0.98f, 0.95f};
     f32 Intensity = 1.2f;
     f32 Ambient = 0.15f;
@@ -69,6 +70,16 @@ struct RigidBodyComponent : public IComponent {
 
 struct NameComponent : public IComponent {
     std::string Name = "Entity";
+};
+
+struct TagComponent : public IComponent {
+    std::string Tag = "Untagged";
+    int Layer = 0; // 0=Default, 1=UI, 2=IgnoreRaycast, 3=Water, 4=AI
+};
+
+struct BillboardComponent : public IComponent {
+    bool FaceCamera = true;
+    bool AxisY = true;
 };
 
 } // namespace Muk
