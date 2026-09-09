@@ -15,6 +15,7 @@ namespace Muk {
 class Renderer;
 class AudioSystem;
 class ParticleSystem;
+class ContentBrowser;
 struct EditorEntityInfo;
 
 enum class AgentPhase {
@@ -60,7 +61,7 @@ public:
     }
 
     void DrawImGui();
-    bool SaveGeneratedAssets(ContentBrowser* browser = nullptr); // scripts + levels
+    bool SaveGeneratedAssets(ContentBrowser* browser = nullptr);
 
     void ApplyActions(World& world, Renderer& renderer, AudioSystem* audio,
                       std::vector<EditorEntityInfo>& entities, Entity& selected,
