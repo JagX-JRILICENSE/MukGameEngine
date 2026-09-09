@@ -1,18 +1,17 @@
-# Muk Game Engine v0.10
+# Muk Game Engine v0.11
 
-**Product:** Muk Game Engine  
 https://github.com/JagX-JRILICENSE/MukGameEngine
 
-## v0.10 features
+## v0.11 — next five
 
-1. **Non-blocking multi-agent AI** — AsyncAI worker; editor never freezes  
-2. **GPU SceneRT screenshots** — F12 → `Assets/Screenshots/*.tga`  
-3. **Collectible orbs** — distance pickup, score, complete callback  
-4. **Particle bursts** — collect / win FX  
-5. **Script autosave** — `Assets/Scripts/*.muk` + Content Browser listing  
+1. **Embedded app icon** — purple/gold Muk logo on the window/taskbar  
+2. **AI spawn undo batch** — Ctrl+Z / Toolbar **Undo AI** removes last AI-built entities  
+3. **Grid A\* pathfinding** — Enemy chases Player around obstacles  
+4. **Bloom + hemisphere IBL** — **Post / IBL** panel (exposure, bloom, sky/ground)  
+5. **Skinning** — demo arm skeleton with bone-cube skinning draw  
 
 ### Controls
-F5 Play · F12 Screenshot · WASD move · walk into orbs to collect
+WASD · F5 Play · F12 Screenshot · Ctrl+Z undo (including AI batch)
 
 ### Build
 ```powershell
