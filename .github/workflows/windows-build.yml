@@ -5,9 +5,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  CMAKE_BUILD_PARALLEL_LEVEL: 4
-
 jobs:
   build:
     name: Build Muk (Windows x64)
@@ -15,59 +12,40 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Show cmake
-        shell: cmd
-        run: cmake --version
-
-      - name: Configure CMake (VS 2022)
+      - name: Configure CMake
         shell: cmd
         run: |
           cmake -B build -G "Visual Studio 17 2022" -A x64 -DMUK_USE_IMGUI=OFF -DMUK_USE_TINYGLTF=OFF -DMUK_USE_JOLT=OFF -DMUK_BUILD_SAMPLES=OFF -DMUK_BUILD_EDITOR=ON
-          if errorlevel 1 (
-            echo ===== CMakeOutput =====
-            if exist build\CMakeFiles\CMakeOutput.log type build\CMakeFiles\CMakeOutput.log
-            echo ===== CMakeError =====
-            if exist build\CMakeFiles\CMakeError.log type build\CMakeFiles\CMakeError.log
-            exit /b 1
-          )
 
       - name: Build Release
         shell: cmd
-        run: cmake --build build --config Release --parallel 4
+        run: |
+          cmake --build build --config Release --parallel 4 -- /v:m /fl /flp:logfile=build\msbuild.log;verbosity=minimal
+          if errorlevel 1 (
+            echo ===== MSBUILD LOG TAIL =====
+            powershell -Command "if (Test-Path build\msbuild.log) { Get-Content build\msbuild.log -Tail 120 }"
+            exit /b 1
+          )
 
-      - name: Locate binaries
-        id: bins
+      - name: Locate and package
+        id: pkg
         shell: pwsh
         run: |
           $found = Get-ChildItem -Path build -Recurse -Filter "MukEditor.exe" | Select-Object -First 1
-          if (-not $found) { Get-ChildItem -Path build -Recurse -Filter "*.exe" | ForEach-Object { $_.FullName }; throw "MukEditor.exe missing" }
-          Write-Host "Found $($found.FullName)"
-          "editor=$($found.FullName)" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
-          $rt = Get-ChildItem -Path build -Recurse -Filter "MukRuntime.exe" | Select-Object -First 1
-          if ($rt) { "runtime=$($rt.FullName)" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8 }
-
-      - name: Stage install package
-        shell: pwsh
-        run: |
+          if (-not $found) { throw "MukEditor.exe missing" }
           $out = "MukGameEngine-Windows-x64"
           New-Item -ItemType Directory -Force -Path "$out/bin" | Out-Null
-          Copy-Item "${{ steps.bins.outputs.editor }}" "$out/bin/MukEditor.exe" -Force
-          Copy-Item "${{ steps.bins.outputs.editor }}" "$out/bin/Muk Game Engine.exe" -Force
-          if ("${{ steps.bins.outputs.runtime }}") {
-            Copy-Item "${{ steps.bins.outputs.runtime }}" "$out/bin/MukRuntime.exe" -Force
-          }
-          $dir = Split-Path "${{ steps.bins.outputs.editor }}" -Parent
-          Get-ChildItem $dir -Filter "*.dll" -ErrorAction SilentlyContinue | Copy-Item -Destination "$out/bin/" -Force
+          Copy-Item $found.FullName "$out/bin/MukEditor.exe"
+          Copy-Item $found.FullName "$out/bin/Muk Game Engine.exe"
+          $rt = Get-ChildItem -Path build -Recurse -Filter "MukRuntime.exe" | Select-Object -First 1
+          if ($rt) { Copy-Item $rt.FullName "$out/bin/MukRuntime.exe" }
+          "Windows desktop build (not Android APK). Run bin\MukEditor.exe" | Set-Content "$out/INSTALL.txt"
           Copy-Item README.md $out/ -ErrorAction SilentlyContinue
-          "Run bin\MukEditor.exe (Windows app, not Android APK)" | Set-Content "$out/INSTALL.txt"
 
-      - name: Upload Windows app artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: MukGameEngine-Windows-x64
           path: MukGameEngine-Windows-x64
-          if-no-files-found: error
           retention-days: 30
