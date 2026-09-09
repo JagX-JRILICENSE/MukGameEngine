@@ -5,7 +5,7 @@ endif()
 
 FetchContent_Declare(imgui
   GIT_REPOSITORY https://github.com/ocornut/imgui.git
-  GIT_TAG docking
+  GIT_TAG v1.91.8-docking
   GIT_SHALLOW TRUE
 )
 FetchContent_GetProperties(imgui)
@@ -28,18 +28,20 @@ target_include_directories(MukEditor PRIVATE
   ${imgui_SOURCE_DIR}/backends
 )
 
-target_compile_definitions(MukEditor PRIVATE MUK_USE_IMGUI)
+target_compile_definitions(MukEditor PRIVATE
+  MUK_USE_IMGUI
+  UNICODE
+  _UNICODE
+)
 
 if(WIN32)
   target_link_libraries(MukEditor PRIVATE
-    d3d12 dxgi d3dcompiler user32 gdi32 winhttp shell32
+    d3d12 dxgi d3dcompiler user32 gdi32
   )
-  target_compile_options(MukEditor PRIVATE /W3 /EHsc /O2 /MT)
+  # Dynamic CRT to avoid ImGui + MSVC /MT conflicts on CI
+  target_compile_options(MukEditor PRIVATE /W3 /EHsc /O2 /MD)
   set_target_properties(MukEditor PROPERTIES
     OUTPUT_NAME "MukEditor"
     WIN32_EXECUTABLE TRUE
   )
-  if(EXISTS "${CMAKE_SOURCE_DIR}/Resources/app.rc")
-    target_sources(MukEditor PRIVATE ${CMAKE_SOURCE_DIR}/Resources/app.rc)
-  endif()
 endif()
