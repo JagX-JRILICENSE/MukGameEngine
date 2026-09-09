@@ -2,12 +2,14 @@
 #include "Core/Core.h"
 #include <string>
 #include <unordered_map>
-#include <vector>
+#include <cmath>
 
 #ifdef MUK_PLATFORM_WINDOWS
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <Windows.h>
 #include <Xinput.h>
-#pragma comment(lib, "xinput9_1_0.lib")
 #endif
 
 namespace Muk {
@@ -26,7 +28,7 @@ public:
     void Update(int index = 0) {
 #ifdef MUK_PLATFORM_WINDOWS
         XINPUT_STATE xs{};
-        if (XInputGetState(index, &xs) == ERROR_SUCCESS) {
+        if (XInputGetState((DWORD)index, &xs) == ERROR_SUCCESS) {
             m_State.Connected = true;
             auto dz = [](SHORT v) {
                 float f = v / 32768.f;
@@ -59,10 +61,10 @@ private:
     GamepadState m_State;
 };
 
-/** Action → key code rebinding map */
 class InputRebind {
 public:
     void SetDefault() {
+#ifdef MUK_PLATFORM_WINDOWS
         m_Map["MoveForward"] = 'W';
         m_Map["MoveBack"] = 'S';
         m_Map["MoveLeft"] = 'A';
@@ -70,6 +72,7 @@ public:
         m_Map["Jump"] = VK_SPACE;
         m_Map["Interact"] = 'E';
         m_Map["Sprint"] = VK_SHIFT;
+#endif
     }
 
     void Bind(const std::string& action, int vk) { m_Map[action] = vk; }
