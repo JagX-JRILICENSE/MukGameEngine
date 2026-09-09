@@ -3,6 +3,7 @@
 #include "ECS/Component.h"
 #include <cstdio>
 #include <cmath>
+#include <algorithm>
 
 namespace Muk {
 
